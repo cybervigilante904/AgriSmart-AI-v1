@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", serif;
+  
+  --color-natural-bg: #F7F3EE;
+  --color-natural-text: #2D2926;
+  --color-natural-primary: #2D4F32;
+  --color-natural-accent: #D4A373;
+  --color-natural-brown: #8B5E3C;
+  --color-natural-gold: #E6BA75;
+  --color-natural-cream: #F9F7F2;
+  --color-natural-tan: #F2E8DF;
+
+  --shadow-natural: 0 4px 20px rgba(45, 90, 39, 0.08);
+}
+
+body {
+  @apply bg-natural-bg text-natural-text selection:bg-natural-accent/30 selection:text-natural-primary;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.card-shadow {
+  box-shadow: var(--shadow-natural);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-natural-accent/20 rounded-full hover:bg-natural-accent/40;
+}

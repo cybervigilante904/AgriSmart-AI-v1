@@ -1,0 +1,16 @@
+{
+  "name": "AgriSmart AI",
+  "description": "Comprehensive AI agricultural ecosystem for African farmers. Features plant disease & pest detection, soil intelligence, market prices, farm records, offline SMS mode, and multilingual support including Swahili and Zulu.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API",
+    "AI Vision Analysis",
+    "Multilingual Support",
+    "Voice Interaction",
+    "Offline Caching"
+  ]
+}
