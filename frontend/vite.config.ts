@@ -17,6 +17,19 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, 'src'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom', 'motion'],
+            'vendor-ai': ['@google/genai'],
+            'vendor-markdown': ['react-markdown', 'react-dropzone'],
+            'vendor-charts': ['recharts'],
+            'vendor-utils': ['clsx', 'tailwind-merge', 'date-fns', 'dexie'],
+          },
+        },
+      },
+    },
     server: {
       fs: { allow: [projectRoot] },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

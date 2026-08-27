@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   LocateFixed,
@@ -58,13 +58,13 @@ import {
 } from 'lucide-react';
 import { db, type Diagnosis, type FarmerProfile, type ScheduledAlert } from './db';
 import { TRANSLATIONS, type Language } from './translations';
-import { CropRotationPlanner } from './components/CropRotationPlanner';
-import { NotificationScheduler } from './components/NotificationScheduler';
-import { FarmRecordsManager } from './components/FarmRecordsManager';
-import { MarketPricesView } from './components/MarketPricesView';
-import { WeatherForecastView } from './components/WeatherForecastView';
-import { FeaturePhoneSimulatorView } from './components/FeaturePhoneSimulatorView';
-import { CommunityView } from './components/CommunityView';
+const CropRotationPlanner = lazy(() => import('./components/CropRotationPlanner').then(({CropRotationPlanner}) => ({default: CropRotationPlanner})));
+const NotificationScheduler = lazy(() => import('./components/NotificationScheduler').then(({NotificationScheduler}) => ({default: NotificationScheduler})));
+const FarmRecordsManager = lazy(() => import('./components/FarmRecordsManager').then(({FarmRecordsManager}) => ({default: FarmRecordsManager})));
+const MarketPricesView = lazy(() => import('./components/MarketPricesView').then(({MarketPricesView}) => ({default: MarketPricesView})));
+const WeatherForecastView = lazy(() => import('./components/WeatherForecastView').then(({WeatherForecastView}) => ({default: WeatherForecastView})));
+const FeaturePhoneSimulatorView = lazy(() => import('./components/FeaturePhoneSimulatorView').then(({FeaturePhoneSimulatorView}) => ({default: FeaturePhoneSimulatorView})));
+const CommunityView = lazy(() => import('./components/CommunityView').then(({CommunityView}) => ({default: CommunityView})));
 import { exportDiagnosesToCSV } from './csvExport';
 import { 
   runLocalNotificationScheduler, 
@@ -388,7 +388,8 @@ export default function App() {
           </button>
         </div>
 
-        <AnimatePresence mode="wait">
+        <Suspense fallback={<div className="flex min-h-[50vh] items-center justify-center text-natural-primary">Loading...</div>}>
+          <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
             <Dashboard 
               key="dashboard" 
@@ -448,7 +449,8 @@ export default function App() {
               onNavigateToRecords={() => setActiveTab('records')}
             />
           )}
-        </AnimatePresence>
+          </AnimatePresence>
+        </Suspense>
       </main>
 
       {/* Navigation */}
