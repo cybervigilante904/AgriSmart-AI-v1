@@ -9,7 +9,11 @@ export interface Diagnosis {
   resolvedAt?: number;
   treatmentApplied?: string;
   data: {
+    subjectType?: 'Plant' | 'Animal' | 'Unknown';
     plantName: { common: string; scientific: string };
+    animalName?: { common: string; scientific: string };
+    animalSpecies?: string;
+    animalAgeOrClass?: string;
     cropType: string;
     growthStage: string;
     healthStatus: string;
@@ -23,12 +27,15 @@ export interface Diagnosis {
       symptoms?: string[];
       lifeCycle?: string;
       regionalImpact?: string;
+      zoonoticRisk?: 'None' | 'Low' | 'Medium' | 'High';
     };
     advisory: {
       organicOptions: string[];
       chemicalOptions: string[];
       prevention: string[];
       scamAlert?: string;
+      immediateAction?: string[];
+      veterinaryAdvice?: string;
     };
     soilAdvice?: string;
     localization: string;

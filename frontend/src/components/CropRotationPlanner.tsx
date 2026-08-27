@@ -271,7 +271,7 @@ export function CropRotationPlanner({ language, initialSoilContext, onClose, onN
       `;
 
       const res = await getAI().models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.6-flash",
         contents: [{ parts: [{ text: prompt }] }],
         config: { responseMimeType: "application/json" }
       });

@@ -72,7 +72,7 @@ Formatting Rules:
           ];
 
           const response = await ai.models.generateContent({
-            model: "gemini-3.7-flash",
+            model: "gemini-3.6-flash",
             contents: contents as any,
             config: {
               systemInstruction: systemPrompt,
@@ -815,7 +815,7 @@ Constraints:
 - Highly actionable, practical, low-cost organic/cultural methods.`;
 
           const response = await ai.models.generateContent({
-            model: "gemini-3.7-flash",
+            model: "gemini-3.6-flash",
             contents: [{ role: "user", parts: [{ text: smsPrompt }] }],
             config: { temperature: 0.3 }
           });

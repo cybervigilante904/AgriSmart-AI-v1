@@ -54,7 +54,10 @@ import {
   BellRing,
   CloudRain,
   CalendarDays,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ShieldCheck,
+  Stethoscope,
+  MoreHorizontal
 } from 'lucide-react';
 import { db, type Diagnosis, type FarmerProfile, type ScheduledAlert } from './db';
 import { TRANSLATIONS, type Language } from './translations';
@@ -247,6 +250,7 @@ export default function App() {
 
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showMoreNav, setShowMoreNav] = useState(false);
 
   const handleSetLanguage = async (lang: Language) => {
     if (profile) {
@@ -454,8 +458,8 @@ export default function App() {
       </main>
 
       {/* Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-20 border-t bg-white shadow-lg overflow-x-auto no-scrollbar">
-        <div className="flex items-center justify-around py-2 px-4 min-w-[550px]">
+      <nav className="fixed bottom-0 left-0 right-0 z-20 border-t bg-white shadow-lg">
+        <div className="flex w-full items-stretch justify-around gap-1 px-1 py-2 sm:gap-2 sm:px-4">
           <NavButton active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={22} />} label={t.dashboard} />
           <NavButton active={activeTab === 'scanner'} onClick={() => setActiveTab('scanner')} icon={<Camera size={22} />} label={t.scan} />
           <NavButton 
@@ -472,13 +476,43 @@ export default function App() {
             label={t.notificationScheduler ? t.notificationScheduler.split(' ')[0] : "Alerts"} 
           />
           <NavButton active={activeTab === 'records'} onClick={() => setActiveTab('records')} icon={<History size={22} />} label={t.records} />
-          <NavButton active={activeTab === 'soil'} onClick={() => setActiveTab('soil')} icon={<Sprout size={22} />} label={t.soil} />
-          <NavButton active={activeTab === 'market'} onClick={() => setActiveTab('market')} icon={<Coins size={22} />} label={t.market} />
-          <NavButton active={activeTab === 'sms'} onClick={() => setActiveTab('sms')} icon={<Smartphone size={22} />} label="SMS/USSD" />
-          <NavButton active={activeTab === 'community'} onClick={() => setActiveTab('community')} icon={<MessageSquareText size={22} />} label={t.community} />
+          <div className="hidden sm:contents">
+            <NavButton active={activeTab === 'soil'} onClick={() => setActiveTab('soil')} icon={<Sprout size={22} />} label={t.soil} />
+            <NavButton active={activeTab === 'market'} onClick={() => setActiveTab('market')} icon={<Coins size={22} />} label={t.market} />
+            <NavButton active={activeTab === 'sms'} onClick={() => setActiveTab('sms')} icon={<Smartphone size={22} />} label="SMS/USSD" />
+            <NavButton active={activeTab === 'community'} onClick={() => setActiveTab('community')} icon={<MessageSquareText size={22} />} label={t.community} />
+            <NavButton active={activeTab === 'chat'} onClick={() => setActiveTab('chat')} icon={<MessageSquare size={22} />} label={t.chat} />
+          </div>
           <NavButton active={activeTab === 'weather'} onClick={() => setActiveTab('weather')} icon={<CloudSun size={22} />} label={t.weather} />
-          <NavButton active={activeTab === 'chat'} onClick={() => setActiveTab('chat')} icon={<MessageSquare size={22} />} label={t.chat} />
+          <button
+            onClick={() => setShowMoreNav(value => !value)}
+            className="flex min-w-0 flex-1 flex-col items-center gap-1 text-natural-accent/70 sm:hidden"
+            aria-expanded={showMoreNav}
+            aria-label="More navigation options"
+          >
+            <div className={cn("rounded-full p-1.5", showMoreNav && "bg-natural-primary/10 text-natural-primary")}><MoreHorizontal size={22} /></div>
+            <span className="text-[10px] font-bold uppercase tracking-wider">More</span>
+          </button>
         </div>
+        {showMoreNav && (
+          <div className="absolute bottom-full right-2 mb-2 grid w-[min(92vw,20rem)] grid-cols-2 gap-2 rounded-2xl border border-natural-accent/20 bg-white p-3 shadow-xl sm:hidden">
+            {[
+              { tab: 'soil' as const, icon: <Sprout size={18} />, label: t.soil },
+              { tab: 'market' as const, icon: <Coins size={18} />, label: t.market },
+              { tab: 'sms' as const, icon: <Smartphone size={18} />, label: 'SMS/USSD' },
+              { tab: 'community' as const, icon: <MessageSquareText size={18} />, label: t.community },
+              { tab: 'chat' as const, icon: <MessageSquare size={18} />, label: t.chat },
+            ].map(item => (
+              <button
+                key={item.tab}
+                onClick={() => { setActiveTab(item.tab); setShowMoreNav(false); }}
+                className={cn("flex items-center gap-2 rounded-xl px-3 py-3 text-left text-xs font-bold", activeTab === item.tab ? "bg-natural-primary/10 text-natural-primary" : "text-natural-text/70 hover:bg-natural-bg")}
+              >
+                {item.icon} {item.label}
+              </button>
+            ))}
+          </div>
+        )}
       </nav>
 
       {/* Location Selector Modal */}
@@ -1338,7 +1372,7 @@ function NavButton({ active, onClick, icon, label }: { active: boolean, onClick:
     <button 
       onClick={onClick}
       className={cn(
-        "flex flex-col items-center gap-1 transition-colors",
+        "flex min-w-0 flex-1 flex-col items-center gap-1 px-0.5 transition-colors",
         active ? "text-natural-primary" : "text-natural-accent/60 hover:text-natural-primary"
       )}
     >
@@ -1348,7 +1382,7 @@ function NavButton({ active, onClick, icon, label }: { active: boolean, onClick:
       )}>
         {icon}
       </div>
-      <span className="text-[10px] font-bold uppercase tracking-wider">{label}</span>
+      <span className="max-w-full truncate text-[10px] font-bold uppercase tracking-wider">{label}</span>
     </button>
   );
 }
@@ -1376,7 +1410,7 @@ function StrategicAdvice({ language, profile }: { language: Language; profile?: 
         `;
 
         const result = await getAI().models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: "gemini-3.6-flash",
           contents: [{ parts: [{ text: prompt }] }],
           config: { responseMimeType: "application/json" }
         });
@@ -1706,6 +1740,19 @@ function SMSModal({ onClose, language }: { onClose: () => void, language: Langua
   );
 }
 
+function prepareScanImage(file: File): Promise<{ dataUrl: string; mimeType: string }> {
+  return createImageBitmap(file).then(image => {
+    const maxDimension = 768;
+    const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
+    image.close();
+    return { dataUrl: canvas.toDataURL('image/jpeg', 0.72), mimeType: 'image/jpeg' };
+  }).catch(() => Promise.reject(new Error('The image format is not supported.')));
+}
+
 function Scanner({ language }: { language: Language }) {
   const t = TRANSLATIONS[language];
   const [result, setResult] = useState<Diagnosis | null>(null);
@@ -1714,30 +1761,34 @@ function Scanner({ language }: { language: Language }) {
 
   const onDrop = async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64 = reader.result as string;
-      setPreview(base64);
-      setAnalyzing(true);
-      
-      try {
+    if (!file) return;
+    setPreview(URL.createObjectURL(file));
+    setAnalyzing(true);
+
+    try {
         if (!navigator.onLine) {
-          alert("AgriSmart AI requires an active internet connection for plant analysis. Please try again when you are back online.");
-          setAnalyzing(false);
-          return;
+          throw new Error('AgriSmart AI requires an active internet connection. Please try again when you are back online.');
         }
+        const { dataUrl: base64, mimeType } = await prepareScanImage(file);
         const prompt = `
-          You are an agricultural AI expert specializing in African farming.
-          Analyze this image and provide a report in ${language}.
-          
-          DETECTION TYPE: Detect either plant diseases OR pests (insects).
-          Identify common African agricultural pests (e.g., Fall Armyworm, Locusts, Aphids, Maize Stalk Borer, etc.).
+          You are an agricultural and livestock health AI expert specializing in African farming.
+          Analyze the image and provide a concise, practical report in ${language}.
+
+          FIRST classify the subject as Plant, Animal, or Unknown. The scan panel must support both crops and farm animals.
+          For animals, identify the likely species and visible disease, infection, parasite, injury, nutritional problem, or Healthy status.
+          Consider common livestock such as cattle, goats, sheep, pigs, poultry, and rabbits. Do not invent a disease when the image is unclear.
+          If the subject is not clearly identifiable, set subjectType to Unknown, use low confidence, explain the limitation, and recommend an in-person agricultural or veterinary professional.
+          Never claim certainty from an image alone. For suspected contagious or zoonotic conditions, advise isolation and prompt veterinary care.
           
           The response MUST be in JSON format:
+          - subjectType: "Plant" | "Animal" | "Unknown"
           - plantName: { common: string, scientific: string }
-          - detectionType: "Disease" | "Pest" | "Healthy"
+          - animalName: { common: string, scientific: string } (required for Animal, otherwise empty strings)
+          - animalSpecies: string
+          - animalAgeOrClass: string
+          - detectionType: "Disease" | "Pest" | "Infection" | "Parasite" | "Injury" | "Nutritional Problem" | "Healthy" | "Unclear"
           - healthStatus: "Healthy" | "Diseased" | "Infested" | "Deficient"
-          - cropType: string
+          - cropType: string (use empty string for Animal)
           - growthStage: string
           - diagnosis: {
               name: string (Disease or Pest name),
@@ -1748,15 +1799,19 @@ function Scanner({ language }: { language: Language }) {
               isBeneficial: boolean,
               symptoms: string[] (list of visible symptoms),
               lifeCycle: string (brief description of the life cycle),
-              regionalImpact: string (brief note on how this affects African regions)
+              regionalImpact: string (brief note on how this affects African regions),
+              zoonoticRisk: "None" | "Low" | "Medium" | "High"
             }
           - advisory: {
               organicOptions: string[] (specific organic control measures for African context),
-              chemicalOptions: string[] (specific effective chemical control measures),
+              chemicalOptions: string[] (specific effective chemical control measures; for animals only include medicines a veterinarian should prescribe or approve),
               prevention: string[],
+              immediateAction: string[] (what the farmer should do now),
+              veterinaryAdvice: string (for animals, when to contact a veterinarian; otherwise empty string),
               scamAlert: string
             }
           - soilAdvice: string
+          Keep every description to one sentence and every list to at most 3 items.
           - translations: {
               shona: string,
               ndebele: string,
@@ -1765,18 +1820,22 @@ function Scanner({ language }: { language: Language }) {
             }
         `;
 
-        const result = await getAI().models.generateContent({
-          model: "gemini-3-flash-preview",
+        const request = getAI().models.generateContent({
+          model: "gemini-3.6-flash",
           contents: [
             { 
               parts: [
                 { text: prompt },
-                { inlineData: { data: base64.split(",")[1], mimeType: "image/jpeg" } }
+                { inlineData: { data: base64.split(",")[1], mimeType } }
               ] 
             }
           ],
-          config: { responseMimeType: "application/json" }
+          config: { responseMimeType: "application/json", maxOutputTokens: 1200 }
         });
+        const result = await Promise.race([
+          request,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Analysis timed out after 45 seconds. Please try a clearer, smaller image.')), 45000))
+        ]);
 
         if (!result.text) throw new Error("Empty AI response");
         
@@ -1790,14 +1849,20 @@ function Scanner({ language }: { language: Language }) {
         
         await db.diagnoses.add(diagnosis);
         setResult(diagnosis);
-      } catch (error) {
-        console.error("Analysis Error:", error);
-        alert("Sorry, analysis failed. Please check your connection and try again.");
-      } finally {
-        setAnalyzing(false);
+    } catch (error) {
+      console.error("Analysis Error:", error);
+      const message = error instanceof Error ? error.message : 'Unknown analysis error.';
+      const rawMessage = message.toLowerCase();
+      if (rawMessage.includes('429') || rawMessage.includes('resource_exhausted') || rawMessage.includes('quota')) {
+        alert('AI scanning is temporarily unavailable because the Gemini API quota has been reached. Please wait and try again, or enable billing/increase the Gemini API quota.');
+      } else if (message.includes('GEMINI_API_KEY')) {
+        alert('AI scanning is not configured. Add GEMINI_API_KEY to the Render service environment, then redeploy.');
+      } else {
+        alert(`Analysis failed: ${message}`);
       }
-    };
-    reader.readAsDataURL(file);
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
@@ -1860,6 +1925,10 @@ function AnalysisView({ result, language, onBack }: { result: Diagnosis, languag
   const [treatment, setTreatment] = useState(result.treatmentApplied || '');
   const [showSolveForm, setShowSolveForm] = useState(false);
   const d = result.data;
+  const isAnimal = d.subjectType === 'Animal';
+  const subjectName = isAnimal
+    ? (d.animalName?.common || d.animalSpecies || 'Unknown Animal')
+    : (d.plantName?.common || 'Unknown Plant');
   const isHealthy = d.healthStatus === "Healthy";
 
   const handleSolve = async () => {
@@ -1872,10 +1941,10 @@ function AnalysisView({ result, language, onBack }: { result: Diagnosis, languag
 
        // Attempt to update farm records if a matching crop is found
        const records = await db.records.toArray();
-       const matchedRecord = records.find(r => 
+       const matchedRecord = !isAnimal && d.plantName?.common ? records.find(r => 
          r.cropName.toLowerCase().includes(d.plantName.common.toLowerCase()) ||
          d.plantName.common.toLowerCase().includes(r.cropName.toLowerCase())
-       );
+       ) : undefined;
 
        if (matchedRecord && matchedRecord.id) {
          const newTreatments = [...(matchedRecord.treatments || []), {
@@ -1926,8 +1995,11 @@ function AnalysisView({ result, language, onBack }: { result: Diagnosis, languag
           <div className="p-6">
             <div className="flex justify-between items-start mb-6">
               <div>
-                <h2 className="text-3xl font-serif font-bold text-natural-primary leading-tight">{d?.plantName?.common || "Unknown Plant"}</h2>
-                <p className="text-sm text-natural-accent font-medium italic mt-1">{d?.plantName?.scientific || "Scientific name unknown"}</p>
+                <div className="mb-2 inline-flex items-center rounded-full bg-natural-tan px-3 py-1 text-[10px] font-black uppercase tracking-widest text-natural-primary">
+                  {isAnimal ? 'Animal Health' : d.subjectType === 'Unknown' ? 'Unclear Subject' : 'Crop Health'}
+                </div>
+                <h2 className="text-3xl font-serif font-bold text-natural-primary leading-tight">{subjectName}</h2>
+                <p className="text-sm text-natural-accent font-medium italic mt-1">{isAnimal ? (d.animalName?.scientific || 'Species not confirmed') : (d.plantName?.scientific || 'Scientific name unknown')}</p>
               </div>
             </div>
 
@@ -1951,11 +2023,11 @@ function AnalysisView({ result, language, onBack }: { result: Diagnosis, languag
             <div className="grid grid-cols-2 gap-4 mb-8">
               <div className="bg-natural-cream p-4 rounded-2xl border border-natural-accent/5">
                 <p className="text-[10px] uppercase font-bold text-natural-accent tracking-widest mb-1">Crop Type</p>
-                <p className="text-sm font-bold text-natural-primary">{d?.cropType || "N/A"}</p>
+                <p className="text-sm font-bold text-natural-primary">{isAnimal ? (d.animalSpecies || subjectName) : (d?.cropType || "N/A")}</p>
               </div>
               <div className="bg-natural-cream p-4 rounded-2xl border border-natural-accent/5">
-                <p className="text-[10px] uppercase font-bold text-natural-accent tracking-widest mb-1">Growth Stage</p>
-                <p className="text-sm font-bold text-natural-primary">{d?.growthStage || "N/A"}</p>
+                <p className="text-[10px] uppercase font-bold text-natural-accent tracking-widest mb-1">{isAnimal ? 'Age / Class' : 'Growth Stage'}</p>
+                <p className="text-sm font-bold text-natural-primary">{isAnimal ? (d.animalAgeOrClass || 'N/A') : (d?.growthStage || "N/A")}</p>
               </div>
             </div>
 
@@ -2122,10 +2194,50 @@ function AnalysisView({ result, language, onBack }: { result: Diagnosis, languag
                   </div>
                 </div>
               )}
+
+              {d.advisory?.immediateAction && d.advisory.immediateAction.length > 0 && (
+                <div className="p-5 bg-red-50 rounded-2xl border-2 border-red-200">
+                  <h3 className="font-bold text-red-900 flex items-center gap-2 mb-3">
+                    <AlertTriangle size={18} /> Do This Now
+                  </h3>
+                  <ul className="space-y-2 text-sm text-red-900/80">
+                    {d.advisory.immediateAction.map((action: string, i: number) => <li key={i}>• {action}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {d.advisory?.prevention && d.advisory.prevention.length > 0 && (
+                <div className="p-5 bg-emerald-50 rounded-2xl border border-emerald-200">
+                  <h3 className="font-bold text-emerald-900 flex items-center gap-2 mb-3">
+                    <ShieldCheck size={18} /> Prevention
+                  </h3>
+                  <ul className="space-y-2 text-sm text-emerald-900/80">
+                    {d.advisory.prevention.map((advice: string, i: number) => <li key={i}>• {advice}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {isAnimal && d.advisory?.veterinaryAdvice && (
+                <div className="p-5 bg-sky-50 rounded-2xl border border-sky-200">
+                  <h3 className="font-bold text-sky-900 flex items-center gap-2 mb-2">
+                    <Stethoscope size={18} /> Veterinary Advice
+                  </h3>
+                  <p className="text-sm text-sky-900/80 leading-relaxed">{d.advisory.veterinaryAdvice}</p>
+                </div>
+              )}
+
+              {isAnimal && d.diagnosis?.zoonoticRisk && d.diagnosis.zoonoticRisk !== 'None' && (
+                <div className="p-5 bg-orange-50 rounded-2xl border-2 border-orange-300">
+                  <h3 className="font-bold text-orange-900 flex items-center gap-2 mb-2">
+                    <AlertTriangle size={18} /> Possible Zoonotic Risk: {d.diagnosis.zoonoticRisk}
+                  </h3>
+                  <p className="text-sm text-orange-900/80">Avoid contact with bodily fluids, keep the animal isolated, and contact a veterinary professional promptly.</p>
+                </div>
+              )}
             </div>
           )}
 
-          <div className="mt-8 space-y-4 pt-6 border-t border-natural-accent/10">
+          {isAnimal ? null : <div className="mt-8 space-y-4 pt-6 border-t border-natural-accent/10">
              <div className="p-4 bg-natural-primary text-white rounded-2xl shadow-lg">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-natural-accent mb-2">{t.soilIntelligence}</p>
                 <p className="text-sm italic">{d.soilAdvice}</p>
@@ -2154,7 +2266,7 @@ function AnalysisView({ result, language, onBack }: { result: Diagnosis, languag
                 )}
                </div>
              )}
-          </div>
+          </div>}
         </div>
       </div>
     </div>
@@ -2989,7 +3101,7 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
         User message: ${queryText}`;
 
          const response = await getAI().models.generateContent({
-          model: "gemini-3.7-flash",
+          model: "gemini-3.6-flash",
           contents: [
             ...messages.slice(-4).map(m => ({ 
               role: m.role as 'user' | 'model', 
@@ -3604,7 +3716,7 @@ function SoilIntelligence({ language }: { language: Language }) {
       `;
 
        const res = await getAI().models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.6-flash",
         contents: [{ parts: [{ text: prompt }] }],
         config: { responseMimeType: "application/json" }
       });
