@@ -25,6 +25,40 @@ async function startServer() {
 
   app.use(express.json({ limit: "10mb" }));
 
+  app.post("/api/analyze-image", async (req, res) => {
+    try {
+      const { imageBase64, mimeType = "image/jpeg", prompt } = req.body;
+      if (!imageBase64 || !prompt) {
+        return res.status(400).json({ error: "Image and analysis prompt are required" });
+      }
+
+      const ai = getAI();
+      if (!ai) {
+        return res.status(503).json({ error: "GEMINI_API_KEY is not configured" });
+      }
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: {
+          parts: [
+            { text: prompt },
+            { inlineData: { data: imageBase64, mimeType } }
+          ]
+        },
+        config: { responseMimeType: "application/json", maxOutputTokens: 1200 }
+      });
+
+      if (!response.text) {
+        return res.status(502).json({ error: "The AI returned an empty analysis" });
+      }
+
+      return res.json({ data: JSON.parse(response.text) });
+    } catch (error: any) {
+      console.error("Image analysis error:", error);
+      return res.status(500).json({ error: error.message || "Failed to analyze image" });
+    }
+  });
+
   // AI Chat endpoint with automated visual identification and image generation
   app.post("/api/chat", async (req, res) => {
     try {

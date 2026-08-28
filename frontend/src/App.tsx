@@ -1850,26 +1850,26 @@ function Scanner({ language }: { language: Language }) {
             }
         `;
 
-        const request = getAI().models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: [
-            { 
-              parts: [
-                { text: prompt },
-                { inlineData: { data: base64.split(",")[1], mimeType } }
-              ] 
-            }
-          ],
-          config: { responseMimeType: "application/json", maxOutputTokens: 1200 }
+        const request = fetch('/api/analyze-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: base64.split(",")[1],
+            mimeType,
+            prompt
+          })
+        }).then(async response => {
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || 'Image analysis request failed');
+          return payload;
         });
         const result = await Promise.race([
           request,
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Analysis timed out after 45 seconds. Please try a clearer, smaller image.')), 45000))
         ]);
 
-        if (!result.text) throw new Error("Empty AI response");
-        
-        const data = JSON.parse(result.text);
+        const data = result.data;
+        if (!data) throw new Error("Empty AI response");
         const diagnosis: Diagnosis = {
           timestamp: Date.now(),
           imageUrl: base64,
