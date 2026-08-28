@@ -26,6 +26,28 @@ body {
   box-shadow: var(--shadow-natural);
 }
 
+.glitter-name {
+  background: linear-gradient(110deg, #8B5E3C 20%, #E6BA75 38%, #FFF4D6 50%, #E6BA75 62%, #8B5E3C 80%);
+  background-size: 220% auto;
+  animation: glitter-name-shimmer 2.8s linear infinite;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+@keyframes glitter-name-shimmer {
+  to {
+    background-position: 220% center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glitter-name {
+    animation: none;
+    background-position: center;
+  }
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

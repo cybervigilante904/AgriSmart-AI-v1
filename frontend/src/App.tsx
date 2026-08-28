@@ -57,10 +57,12 @@ import {
   FileSpreadsheet,
   ShieldCheck,
   Stethoscope,
-  MoreHorizontal
+  MoreHorizontal,
+  Info
 } from 'lucide-react';
 import { db, type Diagnosis, type FarmerProfile, type ScheduledAlert } from './db';
 import { TRANSLATIONS, type Language } from './translations';
+import { AboutView } from './components/AboutView';
 const CropRotationPlanner = lazy(() => import('./components/CropRotationPlanner').then(({CropRotationPlanner}) => ({default: CropRotationPlanner})));
 const NotificationScheduler = lazy(() => import('./components/NotificationScheduler').then(({NotificationScheduler}) => ({default: NotificationScheduler})));
 const FarmRecordsManager = lazy(() => import('./components/FarmRecordsManager').then(({FarmRecordsManager}) => ({default: FarmRecordsManager})));
@@ -114,7 +116,7 @@ function cn(...inputs: ClassValue[]) {
 
 export default function App() {
   const [language, setLanguage] = useState<Language | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'scanner' | 'history' | 'chat' | 'records' | 'market' | 'soil' | 'community' | 'weather' | 'sms' | 'scheduler'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'scanner' | 'history' | 'chat' | 'records' | 'market' | 'soil' | 'community' | 'weather' | 'sms' | 'scheduler' | 'about'>('dashboard');
   const [profile, setProfile] = useState<FarmerProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
@@ -314,7 +316,9 @@ export default function App() {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-natural-primary text-white shadow-sm">
             <Sprout size={20} />
           </div>
-          <h1 className="text-xl font-serif font-bold tracking-tight text-natural-primary">AgriSmart AI</h1>
+          <div className="flex items-center gap-1.5" aria-label="AgriSmart">
+            <h1 className="text-xl font-serif font-bold tracking-tight text-natural-primary">AgriSmart</h1>
+          </div>
         </div>
         
         <div className="flex items-center gap-2">
@@ -367,9 +371,9 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pb-24">
+      <main className="flex-1 overflow-y-auto pb-24 pt-12 sm:pt-0">
         {/* Global Sync/Status Indicator */}
-        <div className="fixed top-16 right-4 z-10 flex items-center gap-2 pointer-events-auto">
+        <div className="fixed top-16 right-3 z-10 flex items-center gap-2 pointer-events-auto sm:right-4">
           <button 
             id="sync-status-btn"
             onClick={performSync}
@@ -453,13 +457,14 @@ export default function App() {
               onNavigateToRecords={() => setActiveTab('records')}
             />
           )}
+          {activeTab === 'about' && <AboutView key="about" />}
           </AnimatePresence>
         </Suspense>
       </main>
 
       {/* Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-20 border-t bg-white shadow-lg">
-        <div className="flex w-full items-stretch justify-around gap-1 px-1 py-2 sm:gap-2 sm:px-4">
+        <div className="flex w-full items-stretch justify-around gap-0 px-0 py-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom))] sm:gap-2 sm:px-4 sm:py-2 sm:pb-2">
           <NavButton active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={22} />} label={t.dashboard} />
           <NavButton active={activeTab === 'scanner'} onClick={() => setActiveTab('scanner')} icon={<Camera size={22} />} label={t.scan} />
           <NavButton 
@@ -548,6 +553,10 @@ export default function App() {
             setShowSettingsModal(false);
             setActiveTab('scheduler');
           }}
+          onOpenAbout={() => {
+            setShowSettingsModal(false);
+            setActiveTab('about');
+          }}
           onSync={performSync}
           isOnline={isOnline}
           isSyncing={isSyncing}
@@ -564,6 +573,7 @@ function SettingsModal({
   onChangeLanguage, 
   onChangeLocation,
   onOpenScheduler,
+  onOpenAbout,
   onSync,
   isOnline,
   isSyncing
@@ -574,6 +584,7 @@ function SettingsModal({
   onChangeLanguage: () => void;
   onChangeLocation: () => void;
   onOpenScheduler?: () => void;
+  onOpenAbout?: () => void;
   onSync: () => void;
   isOnline: boolean;
   isSyncing: boolean;
@@ -636,6 +647,25 @@ function SettingsModal({
               >
                 <Bell size={14} className="text-natural-gold" />
                 <span>Configure Alert Preferences</span>
+              </button>
+            )}
+          </div>
+
+          {/* About */}
+          <div className="flex items-center justify-between gap-4 rounded-[28px] border border-natural-accent/15 bg-natural-tan/20 p-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <Info size={20} className="shrink-0 text-natural-gold" />
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-wider text-natural-primary">About AgriSmart</p>
+                <p className="mt-1 text-xs text-natural-text/65">Creator, company, app details, and contact options.</p>
+              </div>
+            </div>
+            {onOpenAbout && (
+              <button
+                onClick={onOpenAbout}
+                className="shrink-0 rounded-xl bg-natural-primary px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-natural-primary/90"
+              >
+                Open
               </button>
             )}
           </div>
@@ -1372,17 +1402,17 @@ function NavButton({ active, onClick, icon, label }: { active: boolean, onClick:
     <button 
       onClick={onClick}
       className={cn(
-        "flex min-w-0 flex-1 flex-col items-center gap-1 px-0.5 transition-colors",
+        "flex min-w-0 flex-1 flex-col items-center gap-0.5 px-0 transition-colors sm:gap-1 sm:px-0.5",
         active ? "text-natural-primary" : "text-natural-accent/60 hover:text-natural-primary"
       )}
     >
       <div className={cn(
-        "rounded-full p-1.5 transition-colors",
+        "rounded-full p-1 transition-colors sm:p-1.5",
         active && "bg-natural-primary/10"
       )}>
         {icon}
       </div>
-      <span className="max-w-full truncate text-[10px] font-bold uppercase tracking-wider">{label}</span>
+      <span className="max-w-full truncate whitespace-nowrap text-[9px] font-bold uppercase leading-tight tracking-normal sm:text-[10px] sm:tracking-wider">{label}</span>
     </button>
   );
 }

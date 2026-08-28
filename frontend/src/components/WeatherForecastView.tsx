@@ -208,6 +208,13 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
     return { status: "Optimal Window", color: "text-emerald-700 bg-emerald-50 border-emerald-200", desc: "Low wind & zero rain. Ideal for foliar feeds & pest control." };
   };
 
+  const getForecastDayLabel = (date: string | undefined, fallback: string, index: number) => {
+    if (!date) return fallback;
+    if (index === 0) return "Today";
+    if (index === 1) return "Tomorrow";
+    return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+  };
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
       {/* Header & Location Controls */}
@@ -508,7 +515,7 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
                   >
                     <div>
                       <div className={cn("text-xs font-bold uppercase tracking-wider", i === 0 ? "text-emerald-800" : "text-slate-600")}>
-                        {f.day}
+                        {getForecastDayLabel(f.date, f.day, i)}
                       </div>
                       {f.date && (
                         <div className="text-[10px] text-slate-400 mt-0.5">

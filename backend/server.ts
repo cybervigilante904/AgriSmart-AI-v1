@@ -693,10 +693,12 @@ Formatting Rules:
       const rainChance = condition.includes("Rain") ? 70 : (absHash % 30);
       const advice = generateAgriAdvice(baseTemp, humidity, windSpeed, rainChance, rainChance > 50 ? 4.5 : 0, displayName.split(",")[0]);
 
-      const days = ["Today", "Tomorrow", "Wed", "Thu", "Fri", "Sat", "Sun"];
-      const forecast = days.map((day, i) => ({
-        day,
-        date: new Date(Date.now() + i * 86400000).toISOString().split('T')[0],
+      const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const forecast = Array.from({ length: 7 }, (_, i) => {
+        const date = new Date(Date.now() + i * 86400000).toISOString().split('T')[0];
+        return {
+        day: i === 0 ? "Today" : i === 1 ? "Tomorrow" : dayNames[new Date(`${date}T12:00:00Z`).getUTCDay()],
+        date,
         temp: baseTemp + ((i % 3) - 1) * 2,
         tempMin: baseTemp - 8,
         cond: conditions[(absHash + i) % conditions.length],
@@ -704,7 +706,8 @@ Formatting Rules:
         rainChance: (rainChance + i * 10) % 80,
         precipitation: 0,
         uv: 7
-      }));
+        };
+      });
 
       return {
         location: displayName,
