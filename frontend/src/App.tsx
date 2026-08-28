@@ -1789,18 +1789,8 @@ function Scanner({ language }: { language: Language }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
 
-  const onDrop = async (acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    if (!file) return;
-    setPreview(URL.createObjectURL(file));
-    setAnalyzing(true);
-
-    try {
-        if (!navigator.onLine) {
-          throw new Error('AgriSmart AI requires an active internet connection. Please try again when you are back online.');
-        }
-        const { dataUrl: base64, mimeType } = await prepareScanImage(file);
-        const prompt = `
+  const proceedWithAnalysis = async (base64: string, mimeType: string, language: Language) => {
+    const prompt = `
           You are an agricultural and livestock health AI expert specializing in African farming.
           Analyze the image and provide a concise, practical report in ${language}.
 
@@ -1850,47 +1840,70 @@ function Scanner({ language }: { language: Language }) {
             }
         `;
 
-        const request = fetch('/api/analyze-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imageBase64: base64.split(",")[1],
-            mimeType,
-            prompt
-          })
-        }).then(async response => {
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload.error || 'Image analysis request failed');
-          return payload;
-        });
-        const result = await Promise.race([
-          request,
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Analysis timed out after 90 seconds. Please try again with a clearer, smaller image.')), 90000))
-        ]);
+    try {
+      const request = fetch('/api/analyze-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: base64.split(",")[1],
+          mimeType,
+          prompt
+        })
+      }).then(async response => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Image analysis request failed');
+        return payload;
+      });
+      const result = await Promise.race([
+        request,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Analysis timed out after 90 seconds. Please try again with a clearer, smaller image.')), 90000))
+      ]);
 
-        const data = result.data;
-        if (!data) throw new Error("Empty AI response");
-        const diagnosis: Diagnosis = {
-          timestamp: Date.now(),
-          imageUrl: base64,
-          synced: false,
-          data
-        };
-        
-        await db.diagnoses.add(diagnosis);
-        setResult(diagnosis);
+      const data = result.data;
+      if (!data) throw new Error("Empty AI response");
+      const diagnosis: Diagnosis = {
+        timestamp: Date.now(),
+        imageUrl: base64,
+        synced: false,
+        data
+      };
+      
+      await db.diagnoses.add(diagnosis);
+      setResult(diagnosis);
+      setAnalyzing(false);
     } catch (error) {
       console.error("Analysis Error:", error);
       const message = error instanceof Error ? error.message : 'Unknown analysis error.';
       const rawMessage = message.toLowerCase();
       if (rawMessage.includes('429') || rawMessage.includes('resource_exhausted') || rawMessage.includes('quota')) {
-        alert('AI scanning is temporarily unavailable because the Gemini API quota has been reached. Please wait and try again, or enable billing/increase the Gemini API quota.');
+        alert('AI scanning is temporarily unavailable because the Gemini API quota has been reached. Please try again, or enable billing/increase the Gemini API quota.');
       } else if (message.includes('GEMINI_API_KEY')) {
         alert('AI scanning is not configured. Add GEMINI_API_KEY to the Render service environment, then redeploy.');
       } else {
         alert(`Analysis failed: ${message}`);
       }
-    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const onDrop = async (acceptedFiles: File[]) => {
+    const file = acceptedFiles[0];
+    if (!file) return;
+    setPreview(URL.createObjectURL(file));
+    setAnalyzing(true);
+
+    try {
+      if (!navigator.onLine) {
+        throw new Error('AgriSmart AI requires an active internet connection. Please try again when you are back online.');
+      }
+      const { dataUrl: base64, mimeType } = await prepareScanImage(file);
+      
+      // Proceed with full analysis
+      await proceedWithAnalysis(base64, mimeType, language);
+    } catch (error) {
+      console.error("Error:", error);
+      const message = error instanceof Error ? error.message : 'Unknown error.';
+      alert(`Error: ${message}`);
       setAnalyzing(false);
     }
   };

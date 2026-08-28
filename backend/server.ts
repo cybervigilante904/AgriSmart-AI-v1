@@ -94,6 +94,8 @@ async function startServer() {
     }
   });
 
+
+
   // AI Chat endpoint with automated visual identification and image generation
   app.post("/api/chat", async (req, res) => {
     try {
