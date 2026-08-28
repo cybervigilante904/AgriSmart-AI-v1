@@ -1865,7 +1865,7 @@ function Scanner({ language }: { language: Language }) {
         });
         const result = await Promise.race([
           request,
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Analysis timed out after 45 seconds. Please try a clearer, smaller image.')), 45000))
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Analysis timed out after 90 seconds. Please try again with a clearer, smaller image.')), 90000))
         ]);
 
         const data = result.data;
