@@ -1,8 +1,12 @@
 import express from "express";
 import path from "path";
+import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { AGRICULTURAL_IMAGES, findMatchingAgriImages, isImageRequest, type AgriImage } from "../shared/agriculturalImages";
 import { getMarketHubForLocation, getAllMarketHubs } from "../shared/marketData";
+
+dotenv.config({ path: ".env.local" });
+dotenv.config();
 
 let aiClient: GoogleGenAI | null = null;
 function getAI(): GoogleGenAI | null {
