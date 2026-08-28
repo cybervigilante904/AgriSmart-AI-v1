@@ -1788,6 +1788,8 @@ function Scanner({ language }: { language: Language }) {
   const [result, setResult] = useState<Diagnosis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
+  const [validationWarning, setValidationWarning] = useState<{ show: boolean; reason: string }>({ show: false, reason: '' });
+  const [pendingImageData, setPendingImageData] = useState<{ base64: string; mimeType: string } | null>(null);
 
   const proceedWithAnalysis = async (base64: string, mimeType: string, language: Language) => {
     const prompt = `
@@ -1861,6 +1863,20 @@ function Scanner({ language }: { language: Language }) {
 
       const data = result.data;
       if (!data) throw new Error("Empty AI response");
+      
+      // Check if image contains crop or animal
+      if (data.subjectType === "Unknown") {
+        // Show warning and ask user to retake photo
+        setPreview(null);
+        setAnalyzing(false);
+        setValidationWarning({ 
+          show: true, 
+          reason: data.diagnosis?.description || "This image does not appear to contain crops or animals. Please send pictures of plants, crops, or farm animals for analysis."
+        });
+        setPendingImageData({ base64, mimeType });
+        return;
+      }
+      
       const diagnosis: Diagnosis = {
         timestamp: Date.now(),
         imageUrl: base64,
@@ -1884,6 +1900,66 @@ function Scanner({ language }: { language: Language }) {
       }
       setAnalyzing(false);
     }
+  };
+
+  const handleContinueWithAnalysis = async () => {
+    if (pendingImageData) {
+      const diagnosis: Diagnosis = {
+        timestamp: Date.now(),
+        imageUrl: `data:${pendingImageData.mimeType};base64,${pendingImageData.base64}`,
+        synced: false,
+        data: {
+          subjectType: "Unknown",
+          plantName: { common: "", scientific: "" },
+          animalName: { common: "", scientific: "" },
+          animalSpecies: "",
+          animalAgeOrClass: "",
+          detectionType: "Unclear",
+          healthStatus: "Diseased",
+          cropType: "",
+          growthStage: "",
+          diagnosis: {
+            name: "Unable to identify",
+            description: "Could not clearly identify the subject",
+            confidence: "0%",
+            causes: [],
+            severity: "Low",
+            isBeneficial: false,
+            symptoms: [],
+            lifeCycle: "",
+            regionalImpact: "",
+            zoonoticRisk: "None"
+          },
+          advisory: {
+            organicOptions: [],
+            chemicalOptions: [],
+            prevention: [],
+            immediateAction: ["Please send clearer images of crops or animals"],
+            veterinaryAdvice: "",
+            scamAlert: ""
+          },
+          soilAdvice: "",
+          translations: {
+            shona: "",
+            ndebele: "",
+            english: "",
+            swahili: ""
+          }
+        }
+      };
+      
+      await db.diagnoses.add(diagnosis);
+      setResult(diagnosis);
+      setValidationWarning({ show: false, reason: '' });
+      setPendingImageData(null);
+    }
+  };
+
+  const handleRetakeImage = () => {
+    setPreview(null);
+    setAnalyzing(false);
+    setValidationWarning({ show: false, reason: '' });
+    setPendingImageData(null);
   };
 
   const onDrop = async (acceptedFiles: File[]) => {
@@ -1916,6 +1992,56 @@ function Scanner({ language }: { language: Language }) {
 
   if (result) {
     return <AnalysisView result={result} language={language} onBack={() => setResult(null)} />;
+  }
+
+  // Show validation warning if needed
+  if (validationWarning.show) {
+    return (
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="p-6 h-full flex flex-col justify-center items-center"
+      >
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="bg-white rounded-[32px] shadow-xl border border-natural-accent/10 p-8 max-w-md"
+        >
+          <div className="flex justify-center mb-6">
+            <div className="bg-amber-100 p-4 rounded-full">
+              <AlertTriangle size={32} className="text-amber-600" />
+            </div>
+          </div>
+          
+          <h2 className="text-2xl font-serif font-bold text-center text-natural-primary mb-3">
+            No Crops or Animals Detected
+          </h2>
+          
+          <p className="text-center text-natural-text/70 mb-6 text-sm leading-relaxed">
+            {validationWarning.reason}
+          </p>
+          
+          <p className="text-center text-xs text-natural-accent/60 mb-6 italic">
+            Please send pictures of crops, plants, or farm animals for analysis.
+          </p>
+          
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={handleRetakeImage}
+              className="px-4 py-3 bg-natural-primary text-white font-bold rounded-xl hover:opacity-90 transition-opacity text-sm"
+            >
+              Retake Photo
+            </button>
+            <button
+              onClick={handleContinueWithAnalysis}
+              className="px-4 py-3 bg-natural-accent/20 text-natural-accent font-bold rounded-xl hover:opacity-80 transition-opacity text-sm"
+            >
+              Continue Anyway
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    );
   }
 
   return (
