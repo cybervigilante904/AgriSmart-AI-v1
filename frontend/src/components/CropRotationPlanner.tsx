@@ -37,6 +37,8 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const GEMINI_CHAT_MODEL = 'gemini-2.5-flash';
+
 let ai: GoogleGenAI | null = null;
 function getAI(): GoogleGenAI {
   if (!ai) {
@@ -271,7 +273,7 @@ export function CropRotationPlanner({ language, initialSoilContext, onClose, onN
       `;
 
       const res = await getAI().models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_CHAT_MODEL,
         contents: [{ parts: [{ text: prompt }] }],
         config: { responseMimeType: "application/json" }
       });

@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import dotenv from "dotenv";
-import { GoogleGenAI } from "@google/genai";
 import { AGRICULTURAL_IMAGES, findMatchingAgriImages, isImageRequest, type AgriImage } from "../shared/agriculturalImages";
 import { getMarketHubForLocation, getAllMarketHubs } from "../shared/marketData";
 import { initializeDatabase, registerUser, loginUser, verifyToken, getUserById, updateUserProfile, requestPasswordReset, resetPasswordWithCode } from "./auth.js";
@@ -9,19 +8,50 @@ import { initializeDatabase, registerUser, loginUser, verifyToken, getUserById, 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
 
-let aiClient: GoogleGenAI | null = null;
-function getAI(): GoogleGenAI | null {
-  if (!aiClient && process.env.GEMINI_API_KEY) {
-    aiClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
+const GEMINI_CHAT_MODEL = process.env.GEMINI_MODEL || process.env.GEMINI_CHAT_MODEL || "gemini-2.5-flash";
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image-preview";
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash";
+
+let groqClient: { apiKey: string } | null = null;
+function getGroq(): { apiKey: string } | null {
+  const key = process.env.GROQ_API_KEY?.trim();
+  if (!key) return null;
+  if (!groqClient || groqClient.apiKey !== key) {
+    groqClient = { apiKey: key };
   }
-  return aiClient;
+  return groqClient;
+}
+
+async function callGroq(messages: any[], model: string = "llama-3.1-8b-instant", maxTokens: number = 1200) {
+  const groq = getGroq();
+  if (!groq) return null;
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${groq.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || null;
+}
+
+async function callGroqVision(messages: any[], model: string = "openai/gpt-oss-20b", maxTokens: number = 1200) {
+  const groq = getGroq();
+  if (!groq) return null;
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${groq.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || null;
 }
 
 async function startServer() {
@@ -40,16 +70,25 @@ async function startServer() {
         return res.status(400).json({ error: "Image and analysis prompt are required" });
       }
 
-      if (process.env.OPENROUTER_API_KEY) {
+      const groqKey = process.env.GROQ_API_KEY?.trim();
+      const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
+
+      if (!groqKey && !openRouterKey) {
+        return res.status(500).json({
+          error: "No AI provider key is configured. Add GROQ_API_KEY or OPENROUTER_API_KEY to your .env.local file before uploading an image."
+        });
+      }
+
+      if (openRouterKey) {
         const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            Authorization: `Bearer ${openRouterKey}`,
             "Content-Type": "application/json",
             "X-OpenRouter-Title": "AgriSmart AI"
           },
           body: JSON.stringify({
-            model: process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash",
+            model: OPENROUTER_MODEL,
             messages: [{
               role: "user",
               content: [
@@ -71,27 +110,61 @@ async function startServer() {
         return res.json({ data: JSON.parse(content) });
       }
 
-      const ai = getAI();
-      if (!ai) {
-        return res.status(503).json({ error: "Configure OPENROUTER_API_KEY or GEMINI_API_KEY" });
+      if (groqKey) {
+        const groqResponse = await callGroqVision([
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              {
+                type: "image_url",
+                image_url: { url: `data:${mimeType};base64,${imageBase64}` }
+              }
+            ]
+          }
+        ], process.env.GROQ_VISION_MODEL || "openai/gpt-oss-20b", 1200);
+
+        if (groqResponse) {
+          return res.json({ data: JSON.parse(groqResponse) });
+        }
+
+        return res.status(500).json({
+          error: "Groq is configured, but the model available on this account does not support image analysis. Add OPENROUTER_API_KEY for image uploads or set GROQ_VISION_MODEL to a supported Groq vision model."
+        });
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: {
-          parts: [
-            { text: prompt },
-            { inlineData: { data: imageBase64, mimeType } }
-          ]
-        },
-        config: { responseMimeType: "application/json", maxOutputTokens: 1200 }
+      return res.status(500).json({
+        error: "Image analysis is unavailable because no valid AI provider key is configured. Add OPENROUTER_API_KEY to your .env.local file."
       });
 
-      if (!response.text) {
-        return res.status(502).json({ error: "The AI returned an empty analysis" });
+      const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${openRouterKey}`,
+          "Content-Type": "application/json",
+          "X-OpenRouter-Title": "AgriSmart AI"
+        },
+        body: JSON.stringify({
+          model: OPENROUTER_MODEL,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } }
+            ]
+          }],
+          response_format: { type: "json_object" },
+          max_tokens: 1200
+        })
+      });
+      const openRouterPayload = await openRouterResponse.json();
+      if (!openRouterResponse.ok) {
+        throw new Error(openRouterPayload.error?.message || "OpenRouter image analysis failed");
       }
 
-      return res.json({ data: JSON.parse(response.text) });
+      const content = openRouterPayload.choices?.[0]?.message?.content;
+      if (!content) throw new Error("OpenRouter returned an empty analysis");
+      return res.json({ data: JSON.parse(content) });
     } catch (error: any) {
       console.error("Image analysis error:", error);
       return res.status(500).json({ error: error.message || "Failed to analyze image" });
@@ -147,7 +220,7 @@ Formatting Rules:
           ];
 
           const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+            model: GEMINI_CHAT_MODEL,
             contents: contents as any,
             config: {
               systemInstruction: systemPrompt,
@@ -176,7 +249,7 @@ Formatting Rules:
       if (isExplicitGenRequest && ai && matchedImages.length === 0) {
         try {
           const imageRes = await ai.models.generateContent({
-            model: "gemini-3.1-flash-lite-image",
+            model: GEMINI_IMAGE_MODEL,
             contents: {
               parts: [
                 {
@@ -242,7 +315,7 @@ Formatting Rules:
       if (ai) {
         try {
           const response = await ai.models.generateContent({
-            model: "gemini-3.1-flash-lite-image",
+            model: GEMINI_IMAGE_MODEL,
             contents: {
               parts: [
                 {
@@ -893,7 +966,7 @@ Constraints:
 - Highly actionable, practical, low-cost organic/cultural methods.`;
 
           const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+            model: GEMINI_CHAT_MODEL,
             contents: [{ role: "user", parts: [{ text: smsPrompt }] }],
             config: { temperature: 0.3 }
           });

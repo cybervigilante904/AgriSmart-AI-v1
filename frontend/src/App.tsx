@@ -104,6 +104,8 @@ import {
 import { GoogleGenAI } from "@google/genai";
 
 // Initialize Gemini only when a key is configured so the offline UI can still load.
+const GEMINI_CHAT_MODEL = 'gemini-2.5-flash';
+
 let ai: GoogleGenAI | null = null;
 function getAI(): GoogleGenAI {
   if (!ai) {
@@ -1585,7 +1587,7 @@ function StrategicAdvice({ language, profile }: { language: Language; profile?: 
         `;
 
         const result = await getAI().models.generateContent({
-          model: "gemini-3.6-flash",
+          model: GEMINI_CHAT_MODEL,
           contents: [{ parts: [{ text: prompt }] }],
           config: { responseMimeType: "application/json" }
         });
@@ -1937,15 +1939,25 @@ function Scanner({ language }: { language: Language }) {
 
   const proceedWithAnalysis = async (base64: string, mimeType: string, language: Language) => {
     const prompt = `
-          You are an agricultural and livestock health AI expert specializing in African farming.
-          Analyze the image and provide a concise, practical report in ${language}.
+          You are a practical African farm advisor and livestock health expert.
+          Look closely at the picture and give a simple, farmer-friendly diagnosis in ${language}.
 
-          FIRST classify the subject as Plant, Animal, or Unknown. The scan panel must support both crops and farm animals.
-          For animals, identify the likely species and visible disease, infection, parasite, injury, nutritional problem, or Healthy status.
-          Consider common livestock such as cattle, goats, sheep, pigs, poultry, and rabbits. Do not invent a disease when the image is unclear.
-          If the subject is not clearly identifiable, set subjectType to Unknown, use low confidence, explain the limitation, and recommend an in-person agricultural or veterinary professional.
-          Never claim certainty from an image alone. For suspected contagious or zoonotic conditions, advise isolation and prompt veterinary care.
-          
+          First decide: is this a crop, a plant, an animal, an insect, a disease symptom, a nutrient problem, or none of these?
+          If the image is not clearly a farm-related subject, set subjectType to Unknown and tell the farmer: "This photo does not look like a crop, plant, animal, insect, or disease picture. Please retake the photo or upload a picture of the affected crop or animal."
+          For unrelated pictures, do not guess. Keep confidence low and do not suggest treatment. Just ask for a proper farm photo.
+
+          For crops and plants, look for disease, pest damage, nutrient problems, or healthy growth. If the crop looks weak, pale, yellow, curled, stunted, or leaf-discoloured, consider nutrient deficiency and identify the likely missing nutrient such as N, P, K, Mg, Fe, Zn, Ca, S, B, or Mo.
+          For animals, check for disease, infection, parasite, injury, poor feeding, or healthy condition. Think of cattle, goats, sheep, pigs, poultry, and rabbits.
+          If the picture is unclear, say so honestly and suggest a proper farm or veterinary check.
+          For disease outbreaks or zoonotic risk, advise isolation and early veterinary help.
+
+          IMPORTANT FOR NUTRIENT DEFICIENCIES:
+          - Recognize common signs like yellowing leaves, interveinal chlorosis, purple leaves, weak growth, poor tillering, curling, or poor fruiting.
+          - If nutrient deficiency is likely, set detectionType to "Nutritional Problem", healthStatus to "Deficient", and diagnosis.name to a likely deficiency such as "Nitrogen Deficiency" or "Potassium Deficiency".
+          - In advisory.organicOptions and advisory.chemicalOptions, give solutions for both smallholder farmers and larger commercial farms in one clear sentence each. Example: "Smallholders: compost, manure, or legume intercrops; Large farms: split NPK application based on a soil test and field scouting."
+          - Mention soil testing, compost, manure, foliar feeds, balanced fertilizer, and split applications where relevant.
+          - Do not give nutrient advice when the picture is not a farm-related image; instead say the user should retake the photo.
+
           The response MUST be in JSON format:
           - subjectType: "Plant" | "Animal" | "Unknown"
           - plantName: { common: string, scientific: string }
@@ -1957,20 +1969,20 @@ function Scanner({ language }: { language: Language }) {
           - cropType: string (use empty string for Animal)
           - growthStage: string
           - diagnosis: {
-              name: string (Disease or Pest name),
-              description: string (brief detail about the identification),
+              name: string (Disease, pest, or nutrient deficiency name),
+              description: string (brief field diagnosis; for unrelated images say the picture is not a crop, plant, animal, or disease-related photo and should be retaken),
               confidence: string (percentage),
               causes: string[],
               severity: "Low" | "Medium" | "High",
               isBeneficial: boolean,
-              symptoms: string[] (list of visible symptoms),
-              lifeCycle: string (brief description of the life cycle),
+              symptoms: string[],
+              lifeCycle: string (brief description of the life cycle; use empty string if not relevant),
               regionalImpact: string (brief note on how this affects African regions),
               zoonoticRisk: "None" | "Low" | "Medium" | "High"
             }
           - advisory: {
-              organicOptions: string[] (specific organic control measures for African context),
-              chemicalOptions: string[] (specific effective chemical control measures; for animals only include medicines a veterinarian should prescribe or approve),
+              organicOptions: string[] (simple organic options for African farms; for nutrient deficiencies include compost, manure, green manure, crop residues, and biofertilizer options for both smallholders and large farms),
+              chemicalOptions: string[] (useful chemical or fertilizer options; for animals only include treatments a vet should prescribe; for nutrient deficiencies include balanced NPK, ammonium nitrate, urea, DAP, MOP, foliar micronutrients, lime, gypsum, and fertigation recommendations with smallholder and large-farm context),
               prevention: string[],
               immediateAction: string[] (what the farmer should do now),
               veterinaryAdvice: string (for animals, when to contact a veterinarian; otherwise empty string),
@@ -2015,7 +2027,7 @@ function Scanner({ language }: { language: Language }) {
         setAnalyzing(false);
         setValidationWarning({ 
           show: true, 
-          reason: data.diagnosis?.description || "This image does not appear to contain crops or animals. Please send pictures of plants, crops, or farm animals for analysis."
+          reason: data.diagnosis?.description || "This photo does not look like a crop, plant, animal, insect, or disease picture. Please retake the photo or upload a clear image of the affected crop or animal."
         });
         return;
       }
@@ -3359,7 +3371,7 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
         User message: ${queryText}`;
 
          const response = await getAI().models.generateContent({
-          model: "gemini-3.6-flash",
+          model: GEMINI_CHAT_MODEL,
           contents: [
             ...messages.slice(-4).map(m => ({ 
               role: m.role as 'user' | 'model', 
@@ -3974,7 +3986,7 @@ function SoilIntelligence({ language }: { language: Language }) {
       `;
 
        const res = await getAI().models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_CHAT_MODEL,
         contents: [{ parts: [{ text: prompt }] }],
         config: { responseMimeType: "application/json" }
       });

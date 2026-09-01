@@ -13,6 +13,10 @@ services:
         value: production
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_IMAGE_MODEL
+        value: gemini-2.5-flash-image-preview
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL

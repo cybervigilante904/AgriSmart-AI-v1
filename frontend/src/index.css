@@ -30,8 +30,8 @@ body {
   background: linear-gradient(110deg, #8B5E3C 20%, #E6BA75 38%, #FFF4D6 50%, #E6BA75 62%, #8B5E3C 80%);
   background-size: 220% auto;
   animation: glitter-name-shimmer 2.8s linear infinite;
-  background-clip: text;
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 

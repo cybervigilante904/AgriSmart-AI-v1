@@ -3,6 +3,8 @@
     "target": "ES2022",
     "experimentalDecorators": true,
     "useDefineForClassFields": false,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
     "module": "ESNext",
     "lib": [
       "ES2022",
