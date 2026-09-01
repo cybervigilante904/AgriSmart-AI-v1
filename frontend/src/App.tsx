@@ -1,5 +1,9 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useAuth } from './AuthContext';
+import { LoginPage } from './components/LoginPage';
+import { SignupPage } from './components/SignupPage';
+import { ForgotPasswordPage } from './components/ForgotPasswordPage';
 import { 
   LocateFixed,
   Globe,
@@ -58,7 +62,8 @@ import {
   ShieldCheck,
   Stethoscope,
   MoreHorizontal,
-  Info
+  Info,
+  LogOut
 } from 'lucide-react';
 import { db, type Diagnosis, type FarmerProfile, type ScheduledAlert } from './db';
 import { TRANSLATIONS, type Language } from './translations';
@@ -115,6 +120,8 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export default function App() {
+  const { user, isLoading: authLoading, logout, updateProfile } = useAuth();
+  const [authPage, setAuthPage] = useState<'login' | 'signup' | 'forgot-password'>('login');
   const [language, setLanguage] = useState<Language | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'scanner' | 'history' | 'chat' | 'records' | 'market' | 'soil' | 'community' | 'weather' | 'sms' | 'scheduler' | 'about'>('dashboard');
   const [profile, setProfile] = useState<FarmerProfile | null>(null);
@@ -123,6 +130,9 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState(false);
   const [unreadAlertsCount, setUnreadAlertsCount] = useState<number>(0);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showMoreNav, setShowMoreNav] = useState(false);
 
   // Background scheduler sync on profile or load
   useEffect(() => {
@@ -162,52 +172,42 @@ export default function App() {
     };
   }, []);
 
-  const performSync = async () => {
-    if (!isOnline || isSyncing) return;
-    setIsSyncing(true);
-
-    try {
-      const unsyncedDiagnoses = (await db.diagnoses.toArray()).filter(d => !d.synced);
-      const unsyncedRecords = (await db.records.toArray()).filter(r => !r.synced);
-      
-      if (unsyncedDiagnoses.length === 0 && unsyncedRecords.length === 0) {
-        setIsSyncing(false);
-        return;
-      }
-
-      const response = await fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          diagnoses: unsyncedDiagnoses,
-          records: unsyncedRecords,
-          profile
-        })
-      });
-
-      if (response.ok) {
-        // Mark as synced in local DB
-        const diagIds = unsyncedDiagnoses.map(d => d.id).filter((id): id is number => id !== undefined);
-        const recordIds = unsyncedRecords.map(r => r.id).filter((id): id is number => id !== undefined);
-
-        await db.diagnoses.bulkUpdate(diagIds.map(id => ({ key: id, changes: { synced: true } })));
-        await db.records.bulkUpdate(recordIds.map(id => ({ key: id, changes: { synced: true } })));
-        
-        window.dispatchEvent(new CustomEvent('db-synced'));
-        console.log("Sync complete!");
-      }
-    } catch (err) {
-      console.error("Sync failed:", err);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   useEffect(() => {
-    (window as any).performSync = performSync;
-    if (isOnline) {
-      performSync();
-    }
+    const doSync = async () => {
+      if (!isOnline) return;
+      setIsSyncing(true);
+      try {
+        const unsyncedDiagnoses = (await db.diagnoses.toArray()).filter(d => !d.synced);
+        const unsyncedRecords = (await db.records.toArray()).filter(r => !r.synced);
+        
+        if (unsyncedDiagnoses.length === 0 && unsyncedRecords.length === 0) {
+          setIsSyncing(false);
+          return;
+        }
+
+        const response = await fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ diagnoses: unsyncedDiagnoses, records: unsyncedRecords })
+        });
+
+        if (response.ok) {
+          for (const d of unsyncedDiagnoses) {
+            if (d.id) await db.diagnoses.update(d.id, { synced: true });
+          }
+          for (const r of unsyncedRecords) {
+            if (r.id) await db.records.update(r.id, { synced: true });
+          }
+        }
+      } catch (err) {
+        console.error("Sync failed:", err);
+      } finally {
+        setIsSyncing(false);
+      }
+    };
+
+    (window as any).performSync = doSync;
+    doSync();
   }, [isOnline]);
 
   useEffect(() => {
@@ -250,9 +250,38 @@ export default function App() {
     return () => window.removeEventListener('unhandledrejection', handleRejection);
   }, []);
 
-  const [showLocationModal, setShowLocationModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showMoreNav, setShowMoreNav] = useState(false);
+  // Show auth pages if not authenticated
+  if (authLoading) {
+    return (
+      <motion.div className="min-h-screen bg-gradient-to-br from-natural-primary/5 via-natural-tan/10 to-natural-accent/5 flex items-center justify-center">
+        <Loader2 className="w-12 h-12 animate-spin text-natural-primary" />
+      </motion.div>
+    );
+  }
+
+  if (!user) {
+    if (authPage === 'forgot-password') {
+      return (
+        <ForgotPasswordPage
+          onBackToLogin={() => setAuthPage('login')}
+          onSwitchToSignup={() => setAuthPage('signup')}
+        />
+      );
+    }
+
+    return authPage === 'login' ? (
+      <LoginPage
+        onSuccess={() => setAuthPage('login')}
+        onSwitchToSignup={() => setAuthPage('signup')}
+        onForgotPassword={() => setAuthPage('forgot-password')}
+      />
+    ) : (
+      <SignupPage
+        onSuccess={() => setAuthPage('login')}
+        onSwitchToLogin={() => setAuthPage('login')}
+      />
+    );
+  }
 
   const handleSetLanguage = async (lang: Language) => {
     if (profile) {
@@ -560,15 +589,53 @@ export default function App() {
           onSync={performSync}
           isOnline={isOnline}
           isSyncing={isSyncing}
+          onLogout={logout}
         />
       )}
     </div>
   );
 }
 
+function getCountryFlag(countryName?: string | null): string {
+  if (!countryName) return '🌍';
+  const normalized = countryName.toLowerCase();
+  const flags: Record<string, string> = {
+    'zimbabwe': '🇿🇼',
+    'kenya': '🇰🇪',
+    'south africa': '🇿🇦',
+    'nigeria': '🇳🇬',
+    'tanzania': '🇹🇿',
+    'uganda': '🇺🇬',
+    'zambia': '🇿🇲',
+    'ghana': '🇬🇭',
+    'malawi': '🇲🇼',
+    'ethiopia': '🇪🇹',
+    'rwanda': '🇷🇼',
+    'botswana': '🇧🇼',
+    'mozambique': '🇲🇿',
+    'namibia': '🇳🇦',
+    'angola': '🇦🇴',
+    'cameroon': '🇨🇲',
+    'senegal': '🇸🇳',
+    'ivory coast': '🇨🇮',
+    'burkina faso': '🇧🇫',
+    'mali': '🇲🇱',
+    'united kingdom': '🇬🇧',
+    'usa': '🇺🇸',
+    'canada': '🇨🇦',
+    'australia': '🇦🇺',
+    'india': '🇮🇳',
+    'brazil': '🇧🇷',
+    'mexico': '🇲🇽'
+  };
+  return flags[normalized] || '🌍';
+}
+
 function SettingsModal({ 
   language, 
   profile, 
+  authUser,
+  onUpdateProfile,
   onClose, 
   onChangeLanguage, 
   onChangeLocation,
@@ -576,10 +643,13 @@ function SettingsModal({
   onOpenAbout,
   onSync,
   isOnline,
-  isSyncing
+  isSyncing,
+  onLogout
 }: { 
   language: Language; 
   profile: FarmerProfile | null; 
+  authUser?: { id?: number; name?: string; email?: string; profileImageUrl?: string } | null;
+  onUpdateProfile?: (data: { profileImageUrl?: string }) => Promise<{ success: boolean; error?: string }>;
   onClose: () => void;
   onChangeLanguage: () => void;
   onChangeLocation: () => void;
@@ -588,8 +658,43 @@ function SettingsModal({
   onSync: () => void;
   isOnline: boolean;
   isSyncing: boolean;
+  onLogout: () => void;
 }) {
   const t = TRANSLATIONS[language];
+  const [photoError, setPhotoError] = useState('');
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+
+  const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setPhotoError('Please choose an image smaller than 2MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || '');
+      if (!dataUrl) return;
+      setPhotoError('');
+      setIsUploadingPhoto(true);
+      try {
+        if (onUpdateProfile) {
+          await onUpdateProfile({ profileImageUrl: dataUrl });
+        }
+      } catch (error) {
+        setPhotoError('Unable to save the profile photo right now.');
+      } finally {
+        setIsUploadingPhoto(false);
+      }
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
+
+  const profileName = authUser?.name || profile?.name || 'Farmer';
+  const profileEmail = authUser?.email || 'No email available';
+  const profileImage = authUser?.profileImageUrl || localStorage.getItem('agriSmartProfileImage') || '';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -619,6 +724,31 @@ function SettingsModal({
         </div>
 
         <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+          <div className="rounded-[28px] border border-natural-accent/15 bg-natural-tan/20 p-5">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                {profileImage ? (
+                  <img src={profileImage} alt="Profile" className="h-16 w-16 rounded-full object-cover border-2 border-white shadow-sm" />
+                ) : (
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-natural-primary text-lg font-bold text-white">
+                    {profileName.slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <label className="absolute -bottom-1 -right-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-natural-primary text-white shadow-md transition hover:bg-natural-primary/90">
+                  <Edit3 size={12} />
+                  <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
+                </label>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-lg font-bold text-natural-primary truncate">{profileName}</p>
+                <p className="text-sm text-natural-text/70 truncate">{profileEmail}</p>
+                <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-natural-accent">Account Profile</p>
+              </div>
+            </div>
+            {isUploadingPhoto && <p className="mt-3 text-xs text-natural-primary">Uploading profile photo...</p>}
+            {photoError && <p className="mt-3 text-xs text-red-600">{photoError}</p>}
+          </div>
+
           {/* Notification Scheduler Shortcuts */}
           <div className="bg-amber-50/70 p-5 rounded-[28px] border border-amber-200/80 space-y-3">
             <div className="flex items-center justify-between">
@@ -683,18 +813,23 @@ function SettingsModal({
             </div>
 
             <div className="p-3 bg-white rounded-2xl border border-natural-accent/10 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-bold text-natural-primary">
-                  {profile?.region || 'Not set'}
-                </p>
-                <p className="text-xs text-natural-text/60 font-medium">
-                  {profile?.country || 'Select Country'}
-                  {profile?.gpsLocation && ' • GPS Coordinates Active'}
-                </p>
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <span className="text-2xl shrink-0">
+                  {getCountryFlag(profile?.country)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-natural-primary truncate">
+                    {profile?.region || 'Not set'}
+                  </p>
+                  <p className="text-xs text-natural-text/60 font-medium truncate">
+                    {profile?.country || 'Select Country'}
+                    {profile?.gpsLocation && ' • GPS Coordinates Active'}
+                  </p>
+                </div>
               </div>
               <button 
                 onClick={onChangeLocation}
-                className="px-3 py-1.5 rounded-xl bg-natural-primary text-white text-xs font-bold shadow-sm hover:bg-natural-primary/90 transition-all flex items-center gap-1"
+                className="px-3 py-1.5 rounded-xl bg-natural-primary text-white text-xs font-bold shadow-sm hover:bg-natural-primary/90 transition-all flex items-center gap-1 shrink-0"
               >
                 <Edit3 size={12} />
                 <span>{t.changeLocation}</span>
@@ -751,7 +886,17 @@ function SettingsModal({
         </div>
 
         {/* Footer */}
-        <div className="p-4 bg-natural-bg/50 border-t border-natural-accent/10 text-center">
+        <div className="p-4 bg-natural-bg/50 border-t border-natural-accent/10 space-y-3">
+          <button 
+            onClick={() => {
+              onClose();
+              onLogout();
+            }}
+            className="w-full py-3.5 bg-red-50 text-red-600 rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-red-100 transition-colors border border-red-200 flex items-center justify-center gap-2"
+          >
+            <LogOut size={16} />
+            Sign Out
+          </button>
           <button 
             onClick={onClose}
             className="w-full py-3.5 bg-zinc-800 text-white rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-black transition-colors"
@@ -1789,7 +1934,6 @@ function Scanner({ language }: { language: Language }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [validationWarning, setValidationWarning] = useState<{ show: boolean; reason: string }>({ show: false, reason: '' });
-  const [pendingImageData, setPendingImageData] = useState<{ base64: string; mimeType: string } | null>(null);
 
   const proceedWithAnalysis = async (base64: string, mimeType: string, language: Language) => {
     const prompt = `
@@ -1873,7 +2017,6 @@ function Scanner({ language }: { language: Language }) {
           show: true, 
           reason: data.diagnosis?.description || "This image does not appear to contain crops or animals. Please send pictures of plants, crops, or farm animals for analysis."
         });
-        setPendingImageData({ base64, mimeType });
         return;
       }
       
@@ -1902,64 +2045,12 @@ function Scanner({ language }: { language: Language }) {
     }
   };
 
-  const handleContinueWithAnalysis = async () => {
-    if (pendingImageData) {
-      const diagnosis: Diagnosis = {
-        timestamp: Date.now(),
-        imageUrl: `data:${pendingImageData.mimeType};base64,${pendingImageData.base64}`,
-        synced: false,
-        data: {
-          subjectType: "Unknown",
-          plantName: { common: "", scientific: "" },
-          animalName: { common: "", scientific: "" },
-          animalSpecies: "",
-          animalAgeOrClass: "",
-          detectionType: "Unclear",
-          healthStatus: "Diseased",
-          cropType: "",
-          growthStage: "",
-          diagnosis: {
-            name: "Unable to identify",
-            description: "Could not clearly identify the subject",
-            confidence: "0%",
-            causes: [],
-            severity: "Low",
-            isBeneficial: false,
-            symptoms: [],
-            lifeCycle: "",
-            regionalImpact: "",
-            zoonoticRisk: "None"
-          },
-          advisory: {
-            organicOptions: [],
-            chemicalOptions: [],
-            prevention: [],
-            immediateAction: ["Please send clearer images of crops or animals"],
-            veterinaryAdvice: "",
-            scamAlert: ""
-          },
-          soilAdvice: "",
-          translations: {
-            shona: "",
-            ndebele: "",
-            english: "",
-            swahili: ""
-          }
-        }
-      };
-      
-      await db.diagnoses.add(diagnosis);
-      setResult(diagnosis);
-      setValidationWarning({ show: false, reason: '' });
-      setPendingImageData(null);
-    }
-  };
+
 
   const handleRetakeImage = () => {
     setPreview(null);
     setAnalyzing(false);
     setValidationWarning({ show: false, reason: '' });
-    setPendingImageData(null);
   };
 
   const onDrop = async (acceptedFiles: File[]) => {
@@ -2008,37 +2099,35 @@ function Scanner({ language }: { language: Language }) {
           className="bg-white rounded-[32px] shadow-xl border border-natural-accent/10 p-8 max-w-md"
         >
           <div className="flex justify-center mb-6">
-            <div className="bg-amber-100 p-4 rounded-full">
-              <AlertTriangle size={32} className="text-amber-600" />
+            <div className="bg-red-100 p-4 rounded-full">
+              <AlertTriangle size={32} className="text-red-600" />
             </div>
           </div>
           
-          <h2 className="text-2xl font-serif font-bold text-center text-natural-primary mb-3">
-            No Crops or Animals Detected
+          <h2 className="text-2xl font-serif font-bold text-center text-natural-primary mb-4">
+            Photo Cannot Be Analyzed
           </h2>
           
-          <p className="text-center text-natural-text/70 mb-6 text-sm leading-relaxed">
-            {validationWarning.reason}
+          <p className="text-center text-natural-text/70 mb-5 text-sm leading-relaxed font-medium">
+            This image does not contain any crops, plants, or farm animals.
           </p>
           
-          <p className="text-center text-xs text-natural-accent/60 mb-6 italic">
-            Please send pictures of crops, plants, or farm animals for analysis.
-          </p>
-          
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={handleRetakeImage}
-              className="px-4 py-3 bg-natural-primary text-white font-bold rounded-xl hover:opacity-90 transition-opacity text-sm"
-            >
-              Retake Photo
-            </button>
-            <button
-              onClick={handleContinueWithAnalysis}
-              className="px-4 py-3 bg-natural-accent/20 text-natural-accent font-bold rounded-xl hover:opacity-80 transition-opacity text-sm"
-            >
-              Continue Anyway
-            </button>
+          <div className="bg-natural-tan/30 rounded-xl p-4 mb-6 border border-natural-accent/10">
+            <p className="text-xs font-semibold text-natural-primary mb-2">📸 Tips for Better Photos:</p>
+            <ul className="text-xs text-natural-text/70 space-y-1">
+              <li>• Focus on the plant leaf, crop, or animal directly</li>
+              <li>• Ensure good lighting without harsh shadows</li>
+              <li>• Include affected areas or visible symptoms</li>
+              <li>• Take a close-up showing detail clearly</li>
+            </ul>
           </div>
+          
+          <button
+            onClick={handleRetakeImage}
+            className="w-full px-6 py-3 bg-natural-primary text-white font-bold rounded-xl hover:bg-natural-primary/90 transition-colors text-sm"
+          >
+            Retake Photo
+          </button>
         </motion.div>
       </motion.div>
     );

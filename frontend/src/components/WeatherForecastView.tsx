@@ -97,12 +97,17 @@ const PRESET_LOCATIONS = [
 
 export function WeatherForecastView({ location, language, onLocationChange }: WeatherForecastProps) {
   const [data, setData] = useState<WeatherData | null>(null);
+  const [prevData, setPrevData] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [detectingGps, setDetectingGps] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'hourly' | 'daily'>('daily');
+  const [weatherAlert, setWeatherAlert] = useState<{ type: 'warning' | 'info'; message: string } | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+
+  const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
   const fetchWeather = useCallback(async (locName: string, lat?: number, lng?: number, isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -123,7 +128,15 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Weather service error (${res.status})`);
       const result: WeatherData = await res.json();
+      
+      // Detect significant weather changes
+      if (data && prevData) {
+        detectWeatherChanges(prevData, result);
+      }
+      
+      setPrevData(data);
       setData(result);
+      setLastUpdate(new Date());
     } catch (err: any) {
       console.error("Failed to fetch live weather:", err);
       setError("Unable to load live weather. Showing cached meteorological advisory.");
@@ -131,11 +144,64 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [data, prevData]);
 
+  // Detect significant weather changes and alert farmer
+  const detectWeatherChanges = (oldWeather: WeatherData, newWeather: WeatherData) => {
+    const alerts: string[] = [];
+    
+    // Temperature drop > 5°C (frost risk)
+    if (newWeather.temp < oldWeather.temp - 5) {
+      alerts.push(`⚠️ Temperature dropping rapidly! Frost risk detected. Protect sensitive crops.`);
+    }
+    
+    // Rain chance increase > 30%
+    if (newWeather.rainChance > oldWeather.rainChance + 30) {
+      alerts.push(`🌧️ Heavy rain incoming (${newWeather.rainChance}% chance). Delay spraying & secure loose items.`);
+    }
+    
+    // Wind speed increase > 15 km/h
+    if (newWeather.windSpeed > oldWeather.windSpeed + 15) {
+      alerts.push(`💨 Strong winds approaching (${newWeather.windSpeed}km/h). Avoid chemical application.`);
+    }
+    
+    // Severe weather condition change
+    if (newWeather.isSevere && !oldWeather.isSevere) {
+      alerts.push(`🚨 SEVERE WEATHER ALERT: ${newWeather.condition}. Take immediate protective action.`);
+    }
+    
+    // UV Index spike
+    if ((newWeather.uvIndex || 0) > (oldWeather.uvIndex || 0) + 3) {
+      alerts.push(`☀️ High UV radiation (${newWeather.uvIndex}). Use shade for workers & sensitive seedlings.`);
+    }
+    
+    if (alerts.length > 0) {
+      setWeatherAlert({ 
+        type: newWeather.isSevere ? 'warning' : 'info', 
+        message: alerts.join(' ') 
+      });
+      
+      // Auto-dismiss after 30 seconds
+      setTimeout(() => setWeatherAlert(null), 30000);
+    }
+  };
+
+  // Initial fetch
   useEffect(() => {
     fetchWeather(location);
   }, [location, fetchWeather]);
+
+  // Auto-refresh every 15 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (data?.location) {
+        console.log('[Weather] Auto-refreshing weather data...');
+        fetchWeather(data.location, data.coordinates?.lat, data.coordinates?.lng, true);
+      }
+    }, AUTO_REFRESH_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [data, fetchWeather]);
 
   const handleGpsDetect = () => {
     if (!navigator.geolocation) {

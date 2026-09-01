@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { AGRICULTURAL_IMAGES, findMatchingAgriImages, isImageRequest, type AgriImage } from "../shared/agriculturalImages";
 import { getMarketHubForLocation, getAllMarketHubs } from "../shared/marketData";
+import { initializeDatabase, registerUser, loginUser, verifyToken, getUserById, updateUserProfile, requestPasswordReset, resetPasswordWithCode } from "./auth.js";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -26,6 +27,9 @@ function getAI(): GoogleGenAI | null {
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
+
+  // Initialize database
+  initializeDatabase();
 
   app.use(express.json({ limit: "10mb" }));
 
@@ -1134,6 +1138,156 @@ Constraints:
     } catch (err: any) {
       console.error("USSD endpoint error:", err);
       return res.send("END Network error. Dial *143# to retry.");
+    }
+  });
+
+  // ==================== AUTHENTICATION ENDPOINTS ====================
+
+  // Register endpoint
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const {
+        email,
+        password,
+        name,
+        language,
+        country,
+        region,
+        phoneCountryCode,
+        phoneNumber,
+        recoveryQuestion,
+        recoveryAnswer
+      } = req.body;
+
+      if (!email || !password || !name) {
+        return res.status(400).json({ error: "Email, password, and name are required" });
+      }
+
+      const result = await registerUser(
+        email,
+        password,
+        name,
+        language,
+        country,
+        region,
+        phoneCountryCode,
+        phoneNumber,
+        recoveryQuestion,
+        recoveryAnswer,
+        req.body.profileImageUrl
+      );
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      res.json({ success: true, user: result.user });
+    } catch (error: any) {
+      console.error("Registration error:", error);
+      res.status(500).json({ error: "Registration failed" });
+    }
+  });
+
+  // Password reset request endpoint
+  app.post("/api/auth/request-reset", async (req, res) => {
+    try {
+      const payload = req.body || {};
+      const result = await requestPasswordReset(payload);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+      res.json(result);
+    } catch (error: any) {
+      console.error("Password reset request error:", error);
+      res.status(500).json({ error: "Password reset request failed" });
+    }
+  });
+
+  // Password reset confirm endpoint
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const payload = req.body || {};
+      const result = await resetPasswordWithCode(payload);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+      res.json(result);
+    } catch (error: any) {
+      console.error("Password reset error:", error);
+      res.status(500).json({ error: "Password reset failed" });
+    }
+  });
+
+  // Login endpoint
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { email, password } = req.body;
+
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+
+      const result = await loginUser(email, password);
+      if (!result.success) {
+        return res.status(401).json({ error: result.error });
+      }
+
+      res.json({ success: true, user: result.user, token: result.token });
+    } catch (error: any) {
+      console.error("Login error:", error);
+      res.status(500).json({ error: "Login failed" });
+    }
+  });
+
+  // Verify token endpoint
+  app.post("/api/auth/verify", (req, res) => {
+    try {
+      const { token } = req.body;
+
+      if (!token) {
+        return res.status(400).json({ error: "Token is required" });
+      }
+
+      const decoded = verifyToken(token);
+      if (!decoded) {
+        return res.status(401).json({ error: "Invalid or expired token" });
+      }
+
+      const user = getUserById(decoded.userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({ success: true, user });
+    } catch (error: any) {
+      console.error("Token verification error:", error);
+      res.status(500).json({ error: "Verification failed" });
+    }
+  });
+
+  // Update user profile endpoint
+  app.put("/api/auth/profile", (req, res) => {
+    try {
+      const { token, ...profileData } = req.body;
+
+      if (!token) {
+        return res.status(400).json({ error: "Token is required" });
+      }
+
+      const decoded = verifyToken(token);
+      if (!decoded) {
+        return res.status(401).json({ error: "Invalid or expired token" });
+      }
+
+      const success = updateUserProfile(decoded.userId, profileData);
+      if (!success) {
+        return res.status(500).json({ error: "Failed to update profile" });
+      }
+
+      const user = getUserById(decoded.userId);
+      res.json({ success: true, user });
+    } catch (error: any) {
+      console.error("Profile update error:", error);
+      res.status(500).json({ error: "Profile update failed" });
     }
   });
 
