@@ -15,7 +15,18 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  register: (email: string, password: string, name: string, language?: string) => Promise<{ success: boolean; error?: string }>;
+  register: (
+    email: string,
+    password: string,
+    name: string,
+    language?: string,
+    country?: string,
+    region?: string,
+    phoneCountryCode?: string,
+    phoneNumber?: string,
+    recoveryQuestion?: string,
+    recoveryAnswer?: string
+  ) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateProfile: (data: Partial<AuthUser>) => Promise<{ success: boolean; error?: string }>;
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from './AuthContext';
 import { LoginPage } from './components/LoginPage';
@@ -134,6 +134,40 @@ export default function App() {
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [showMoreNav, setShowMoreNav] = useState(false);
 
+  // Sync function accessible throughout component
+  const performSync = useCallback(async () => {
+    if (!isOnline) return;
+    setIsSyncing(true);
+    try {
+      const unsyncedDiagnoses = (await db.diagnoses.toArray()).filter(d => !d.synced);
+      const unsyncedRecords = (await db.records.toArray()).filter(r => !r.synced);
+      
+      if (unsyncedDiagnoses.length === 0 && unsyncedRecords.length === 0) {
+        setIsSyncing(false);
+        return;
+      }
+
+      const response = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ diagnoses: unsyncedDiagnoses, records: unsyncedRecords })
+      });
+
+      if (response.ok) {
+        for (const d of unsyncedDiagnoses) {
+          if (d.id) await db.diagnoses.update(d.id, { synced: true });
+        }
+        for (const r of unsyncedRecords) {
+          if (r.id) await db.records.update(r.id, { synced: true });
+        }
+      }
+    } catch (err) {
+      console.error("Sync failed:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [isOnline]);
+
   // Background scheduler sync on profile or load
   useEffect(() => {
     const syncAlerts = async () => {
@@ -173,41 +207,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const doSync = async () => {
-      if (!isOnline) return;
-      setIsSyncing(true);
-      try {
-        const unsyncedDiagnoses = (await db.diagnoses.toArray()).filter(d => !d.synced);
-        const unsyncedRecords = (await db.records.toArray()).filter(r => !r.synced);
-        
-        if (unsyncedDiagnoses.length === 0 && unsyncedRecords.length === 0) {
-          setIsSyncing(false);
-          return;
-        }
-
-        const response = await fetch('/api/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ diagnoses: unsyncedDiagnoses, records: unsyncedRecords })
-        });
-
-        if (response.ok) {
-          for (const d of unsyncedDiagnoses) {
-            if (d.id) await db.diagnoses.update(d.id, { synced: true });
-          }
-          for (const r of unsyncedRecords) {
-            if (r.id) await db.records.update(r.id, { synced: true });
-          }
-        }
-      } catch (err) {
-        console.error("Sync failed:", err);
-      } finally {
-        setIsSyncing(false);
-      }
-    };
-
-    (window as any).performSync = doSync;
-    doSync();
+    performSync();
   }, [isOnline]);
 
   useEffect(() => {
