@@ -35,6 +35,123 @@ function getAI(): GoogleGenAI {
   return ai;
 }
 
+function detectCropMention(text: string): string {
+  const lower = text.toLowerCase();
+  const crops = [
+    'maize', 'corn', 'cassava', 'tomato', 'potato', 'banana', 'cabbage', 'beans',
+    'rice', 'wheat', 'soybean', 'sorghum', 'pepper', 'onion', 'sweet potato',
+    'groundnut', 'coffee', 'tea', 'vegetable', 'crop'
+  ];
+
+  const found = crops.find(crop => lower.includes(crop));
+  return found || 'your crop';
+}
+
+function detectNutrientIssue(text: string): { nutrient: string; crop: string; diagnosis: string } | null {
+  const lower = text.toLowerCase();
+  const crop = detectCropMention(text);
+
+  const patterns = [
+    {
+      nutrient: 'Nitrogen',
+      keys: ['nitrogen deficiency', 'n deficiency', 'lack of nitrogen', 'yellow older leaves', 'yellow lower leaves', 'v shape yellow', 'pale green lower leaves'],
+      diagnosis: `Nitrogen deficiency is likely in ${crop}. Older lower leaves turn pale green or yellow first. The plant grows slowly, looks thin, and may form small ears or fruit.`
+    },
+    {
+      nutrient: 'Phosphorus',
+      keys: ['phosphorus deficiency', 'purple leaves', 'purple stems', 'poor rooting', 'stunted roots', 'slow growth'],
+      diagnosis: `Phosphorus deficiency is likely in ${crop}. Growth is stunted, roots stay weak, and the foliage may turn dark green or purple.`
+    },
+    {
+      nutrient: 'Potassium',
+      keys: ['potassium deficiency', 'k deficiency', 'burnt leaf margins', 'leaf edge scorch', 'yellow leaf edges', 'marginal chlorosis'],
+      diagnosis: `Potassium deficiency is likely in ${crop}. Leaf edges scorch and turn brown while the plant remains weak and less able to handle stress.`
+    },
+    {
+      nutrient: 'Iron',
+      keys: ['iron deficiency', 'interveinal chlorosis', 'yellow young leaves', 'iron chlorosis', 'yellow leaf veins'],
+      diagnosis: `Iron deficiency is likely in ${crop}. New leaves turn yellow while veins stay greener, which slows growth and reduces vigor.`
+    },
+    {
+      nutrient: 'Calcium',
+      keys: ['calcium deficiency', 'blossom end rot', 'black bottom tomato', 'fruit tip rot'],
+      diagnosis: `Calcium deficiency is likely in ${crop}. The fruit tip or growing point becomes dark and sunken, especially when watering is irregular.`
+    }
+  ];
+
+  const match = patterns.find(({ keys }) => keys.some(key => lower.includes(key)));
+  if (!match) return null;
+
+  return { nutrient: match.nutrient, crop, diagnosis: match.diagnosis };
+}
+
+function buildCropSpecificAdvice(text: string): string | null {
+  const lower = text.toLowerCase();
+
+  if (lower.includes('maize') || lower.includes('corn')) {
+    if (/(yellow|chlorosis|pale green)/.test(lower) && /(lower|older|bottom)/.test(lower)) {
+      return `This is most likely a nitrogen deficiency in maize. Older lower leaves yellow first, growth slows, and the plants look thin. For smallholders, apply split top-dressing with urea or composted manure and keep weeds down. For commercial farms, use soil testing, split N applications, and field scouting to prevent leaching.`;
+    }
+    if (/(purple|reddish|purple leaves)/.test(lower)) {
+      return `This pattern fits phosphorus deficiency in maize. Early growth is slow, roots are weak, and lower leaves may show purple/red tones. Correct with basal phosphorus, compost, or rock phosphate and maintain root-zone moisture.`;
+    }
+    if (/(brown edge|leaf edge|scorch|burnt margin)/.test(lower)) {
+      return `This matches potassium deficiency in maize. The leaf margins scorch and stems weaken. Correct with potash or a balanced K source, and avoid removing all crop residue.`;
+    }
+  }
+
+  if (lower.includes('tomato')) {
+    if (/(bottom|blossom|black|fruit tip|sunken)/.test(lower) && /(tomato|fruit)/.test(lower)) {
+      return `This is likely blossom-end rot in tomatoes, usually caused by uneven watering and calcium uptake problems. Smallholders should irrigate consistently and mulch; commercial growers should improve drip irrigation and monitor EC and calcium balance.`;
+    }
+    if (/(yellow|ring|target|concentric)/.test(lower) && /(leaf|spot)/.test(lower)) {
+      return `This fits early blight on tomato. Remove affected leaves, avoid wet foliage, and use a registered fungicide or copper spray. Large farms should rotate crops and use resistant varieties.`;
+    }
+  }
+
+  if (lower.includes('potato') || lower.includes('irish potato')) {
+    if (/(brown|black|greasy|water soaked)/.test(lower) && /(leaf|stem|tuber)/.test(lower)) {
+      return `Late blight is a strong possibility in potato. Remove infected foliage quickly, improve air flow, and use a registered fungicide. Smallholders should avoid overhead irrigation, while commercial farms should use field scouting and resistant varieties.`;
+    }
+  }
+
+  if (lower.includes('cassava')) {
+    if (/(mosaic|yellow and green|yellow patches|leaf distortion)/.test(lower)) {
+      return `Cassava mosaic disease is likely. Use clean planting material, remove infected plants, and plant resistant varieties. Smallholders benefit from clean stems and roguing; commercial farms should enforce seed certification and systematic field inspection.`;
+    }
+  }
+
+  if (lower.includes('maize') || lower.includes('corn')) {
+    if (/(streak|yellow streak|parallel streak|vein)/.test(lower)) {
+      return `Maize streak virus is likely. It is spread by leafhoppers, so remove infected plants early and use resistant seed. Commercial farms should monitor vector pressure and use integrated pest management.`;
+    }
+  }
+
+  return null;
+}
+
+function buildDiseaseSpecificAdvice(text: string): string | null {
+  const lower = text.toLowerCase();
+
+  if (/(powdery mildew|white powder|mildew)/.test(lower)) {
+    return `Powdery mildew is likely. It spreads rapidly in humid, dense canopies. Smallholders should increase spacing and use neem or sulfur sprays; larger farms should use registered fungicides and monitor spray timing closely.`;
+  }
+
+  if (/(late blight|early blight|target spot|leaf spot|blight)/.test(lower)) {
+    return `Blight is likely. Focus on removing infected leaves, reducing leaf wetness, and improving spacing. For local farmers, copper sprays and sanitation matter; for commercial farms, fungicide programs and resistant varieties are key.`;
+  }
+
+  if (/(wilt|wilting|bacterial wilt)/.test(lower)) {
+    return `Wilt is likely, and it can be caused by bacterial, fungal, or water stress. Check if the plant stays green while wilting; that often points to bacterial wilt. Remove and destroy infected plants, avoid moving soil, and improve drainage. Commercial farms should isolate affected blocks and diagnose with field checks.`;
+  }
+
+  if (/(mosaic|virus)/.test(lower)) {
+    return `This pattern points to a viral disease. Remove infected plants early, avoid spreading through tools, and use clean planting material. Commercial farms should use certified seed and regular field scouting.`;
+  }
+
+  return null;
+}
+
 function buildConversationalFallbackReply(userText: string, location: string, language: string) {
   const text = userText.trim();
   const normalized = text.toLowerCase();
@@ -45,37 +162,35 @@ function buildConversationalFallbackReply(userText: string, location: string, la
     return `Hello! I’m AgriSmart AI, your farm advisor. I can help with crop health, fertilizer planning, pest control, irrigation, soil management, planting dates, and market decisions${locationNote}. Ask me anything and I’ll give you practical guidance.`;
   }
 
-  const lower = text.toLowerCase();
-  const cropGuess = /(maize|corn|tomato|potato|cassava|banana|cabbage|beans|rice|wheat|onion|pepper|soybean|sorghum|sweet potato|groundnut|tea|coffee)/i.test(lower) ? text.match(/(maize|corn|tomato|potato|cassava|banana|cabbage|beans|rice|wheat|onion|pepper|soybean|sorghum|sweet potato|groundnut|tea|coffee)/i)?.[0] : 'your crop';
+  const cropGuess = detectCropMention(text);
+  const nutrientIssue = detectNutrientIssue(text);
+  const cropSpecificAdvice = buildCropSpecificAdvice(text);
+  const diseaseSpecificAdvice = buildDiseaseSpecificAdvice(text);
 
-  if (/nitrogen|n deficiency|lack of nitrogen|yellow older leaves|nitrogen deficient|nitrogen deficiency/.test(lower)) {
-    return `Likely issue: Nitrogen deficiency in ${cropGuess}.\n\nSymptoms: pale green to yellow lower leaves, slow growth, thin stems, small leaves, and reduced yields.\n\nRecommended action: apply a balanced nitrogen source such as urea or composted manure, side-dress in split applications, and irrigate soon after application. For smallholders, apply well-decomposed manure plus a top dressing when crops are actively growing.\n\nPrevention: do soil testing, rotate legumes, and avoid overwatering or leaching.\n\nIf you share the crop stage and leaf color pattern, I can narrow the recommendation further.`;
+  if (nutrientIssue) {
+    return `${nutrientIssue.diagnosis}\n\nFor smallholders, start with compost, manure, green manure, and a split application of the right nutrient source. For larger farms, use soil testing, correct NPK rates, and place fertilizer near the root zone or through fertigation where appropriate.\n\nImmediate next steps: check the oldest leaves first, check soil pH and moisture, and avoid applying too much at once. If you share a clear photo or the crop stage, I can narrow the diagnosis to the exact deficiency and recommend the best field treatment.`;
   }
 
-  if (/phosphorus|p deficiency|phosphorus deficiency|purple leaves|poor rooting/.test(lower)) {
-    return `Likely issue: Phosphorus deficiency in ${cropGuess}.\n\nSymptoms: dark green or purple leaves, weak roots, delayed maturity, and poor flowering or fruit set.\n\nRecommended action: apply rock phosphate, TSP/DAP, or compost rich in phosphorus at planting, and ensure the root zone is moist. Avoid placing fertilizer too far from the root zone.\n\nPrevention: maintain organic matter, use phosphorus-efficient rotations, and avoid highly acidic or waterlogged soils.`;
+  if (cropSpecificAdvice) {
+    return `${cropSpecificAdvice}\n\nThis is a field-ready guide for both local and commercial farming: smallholders should prioritize affordable, locally available fixes; large farms should add soil testing, scouting, and planned nutrient applications to avoid repeat losses.`;
   }
 
-  if (/potassium|k deficiency|potash|marginal leaf burn|leaf edge scorch/.test(lower)) {
-    return `Likely issue: Potassium deficiency in ${cropGuess}.\n\nSymptoms: yellowing or scorching along leaf edges, weak stalks, poor stress tolerance, and lower fruit quality.\n\nRecommended action: apply potassium-rich fertilizer such as MOP or wood ash in moderation, plus balanced irrigation. Use foliar feeding only as a short-term correction, not the main strategy.\n\nPrevention: keep soil organic matter high and avoid excessive removal of crop residue.`;
+  if (diseaseSpecificAdvice) {
+    return `${diseaseSpecificAdvice}\n\nFor local farmers, prioritize sanitation, pruning, spacing, and affordable local controls. For large farms, use a structured fungicide or disease-management program with field scouting, resistant varieties, and crop rotation.`;
   }
 
-  if (/iron|fe deficiency|chlorosis|yellow young leaves|interveinal chlorosis/.test(lower)) {
-    return `Likely issue: Iron deficiency in ${cropGuess}.\n\nSymptoms: yellowing between leaf veins on young leaves while veins stay green, reduced vigor, and slow growth.\n\nRecommended action: apply chelated iron or a foliar iron spray, correct high pH soils where possible, and improve drainage.\n\nPrevention: avoid excessive liming, keep soil pH in the suitable range, and monitor crops under high heat or water stress.`;
+  if (/(powdery mildew|rust|leaf spot|blight|anthracnose|fusarium|bacterial wilt|downy mildew|late blight|early blight|mosaic|wilt|spot)/.test(normalized)) {
+    const disease = /(powdery mildew|rust|leaf spot|blight|anthracnose|fusarium|bacterial wilt|downy mildew|late blight|early blight|mosaic|wilt|spot)/i.exec(text)?.[0] || 'crop disease';
+    return `${disease.charAt(0).toUpperCase() + disease.slice(1)} is a common field problem in African farming.\n\nWhat to do: remove infected plant parts, avoid overhead watering, improve crop spacing, and use clean seed or resistant varieties. For smallholders, neem, copper sprays, and sanitation help a lot; for commercial farms, use registered fungicides and a field scouting schedule.\n\nIf the problem is spreading quickly, isolate the affected area and inspect the lower leaves first before deciding on treatment.`;
   }
 
-  if (/(powdery mildew|rust|leaf spot|blight|anthracnose|fusarium|bacterial wilt|downy mildew|late blight|early blight)/.test(lower)) {
-    const disease = /(powdery mildew|rust|leaf spot|blight|anthracnose|fusarium|bacterial wilt|downy mildew|late blight|early blight)/i.exec(lower)?.[0] || 'crop disease';
-    return `${disease.charAt(0).toUpperCase() + disease.slice(1)} is a common problem in many African farms.\n\nTypical signs: leaf spots, yellow halos, necrotic patches, powdery growth, wilting, or lesions spreading rapidly across the canopy.\n\nWhat to do immediately: remove infected leaves, avoid overhead watering, increase air circulation, and reduce dense foliage. For chemical control, use a crop-approved fungicide registered for the target disease; for organic systems, use neem, copper sprays, and resistant varieties where available.\n\nLong-term prevention: rotate crops, use clean seed, improve spacing, and keep field sanitation strong.\n\nShare the crop type and the exact symptom pattern if you want a more precise treatment plan.`;
-  }
-
-  if (/(nutrient|deficiency|fertility|yellowing|chlorosis|wilting|poor growth)/.test(lower)) {
-    return `This pattern sounds like a crop nutrition or stress issue in ${cropGuess}.\n\nCheck these first:\n- leaf color pattern: older leaves vs young leaves\n- soil moisture and drainage\n- crop stage and recent fertilizer timing\n- signs of root damage, weeds, or pests\n\nCommon fixes:\n- add the missing nutrient in the correct form\n- use balanced NPK with organic matter\n- correct watering and drainage\n- do soil testing before heavy applications\n\nIf you tell me the crop, the exact leaf symptom, and whether the problem is on old or new leaves, I can identify the most likely nutrient deficiency and the best remedy.`;
+  if (/(nutrient|deficiency|fertility|yellowing|chlorosis|wilting|poor growth)/.test(normalized)) {
+    return `This pattern sounds like a crop nutrition or stress issue in ${cropGuess}.\n\nCheck the oldest leaves first, the soil moisture, and recent fertilizer timing. For smallholder farms, compost, manure, and split dressings are practical and affordable; for larger farms, soil testing and targeted NPK applications usually give better results.\n\nIf you tell me the crop, the exact symptom pattern, and whether it affects old or new leaves, I can match the deficiency more precisely and give the right correction.`;
   }
 
   const topic = text.split(/\s+/).slice(0, 8).join(' ');
 
-  return `Thanks for asking about “${topic}”. I can help with that${locationNote}. For practical field advice, I would check the crop type, crop stage, leaf and root symptoms, recent rainfall, soil moisture, and whether the problem is caused by disease, nutrient stress, or pest damage.\n\nA good response framework is: \n- identify the symptom clearly\n- separate nutrient stress from pest or disease\n- correct the cause quickly\n- protect the crop with prevention measures\n\nIf you share the crop name, the symptom, and whether it is on young or old leaves, I can give you a more accurate diagnosis and treatment plan.`;
+  return `Thanks for asking about “${topic}”. I can help with that${locationNote}. For practical field advice, I would check the crop type, crop stage, leaf and root symptoms, recent rainfall, soil moisture, and whether the issue is caused by disease, nutrient stress, or pest damage.\n\nFor smallholder farmers, the focus is usually on affordable corrective actions, compost, and crop rotation; for larger farms, I would recommend soil testing, split applications, and scouting records.\n\nIf you share the crop name, the symptom, and whether it is on young or old leaves, I can give you a more accurate diagnosis and treatment plan.`;
 }
 
 let groqClient: { apiKey: string } | null = null;
@@ -316,9 +431,10 @@ async function startServer() {
       }
 
       const needsImage = isImageRequest(userText);
+      const needsAgronomicVisual = /(yellowing|chlorosis|blight|mildew|rust|mosaic|wilt|leaf spot|deficiency|nutrient|disease|pest|symptom)/i.test(userText);
       let matchedImages: AgriImage[] = [];
 
-      if (needsImage) {
+      if (needsImage || needsAgronomicVisual) {
         matchedImages = findMatchingAgriImages(userText, 2);
       }
 

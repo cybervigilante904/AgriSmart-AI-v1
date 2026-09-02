@@ -197,6 +197,45 @@ export const AGRICULTURAL_IMAGES: AgriImage[] = [
       'Browning of inner vascular ring in the stem base'
     ]
   },
+  {
+    id: 'lumpy-skin-disease-cattle',
+    title: 'Lumpy Skin Disease in Cattle',
+    category: 'disease',
+    description: 'Cattle showing raised, firm nodules and skin lesions characteristic of lumpy skin disease, often with swelling, fever, and reduced movement.',
+    url: 'https://images.unsplash.com/photo-1553284965-83fd3e82fa5a?auto=format&fit=crop&w=1200&q=80',
+    tags: ['lumpy skin disease', 'lump skin disease', 'lsd', 'cattle disease', 'skin nodules', 'cattle lumps', 'cattle lesion', 'animal disease'],
+    symptomsOrTips: [
+      'Firm skin nodules and raised lumps on the body',
+      'Swollen skin, fever, and reduced grazing or movement',
+      'Spread by insect vectors and often appears in cattle herds'
+    ]
+  },
+  {
+    id: 'foot-and-mouth-cattle',
+    title: 'Foot and Mouth Disease in Cattle',
+    category: 'disease',
+    description: 'Cattle with painful mouth lesions and hoof disease typical of foot and mouth disease, causing salivation, lameness, and reduced feeding.',
+    url: 'https://images.unsplash.com/photo-1533227268428-f9ed0900fb3b?auto=format&fit=crop&w=1200&q=80',
+    tags: ['foot and mouth disease', 'fmd', 'cattle mouth lesions', 'hoof lesions', 'animal disease', 'lumpy skin disease', 'cattle disease'],
+    symptomsOrTips: [
+      'Blisters or sores in the mouth and around the hooves',
+      'Salivation, drooling, and limping',
+      'High contagious risk among cattle and cloven-hoof animals'
+    ]
+  },
+  {
+    id: 'newcastle-disease-chickens',
+    title: 'Newcastle Disease in Poultry',
+    category: 'disease',
+    description: 'Chickens with respiratory distress, twisted necks, paralysis, and sudden flock losses consistent with Newcastle disease.',
+    url: 'https://images.unsplash.com/photo-1548550023-2bdb3c5beed7?auto=format&fit=crop&w=1200&q=80',
+    tags: ['newcastle disease', 'chicken disease', 'poultry disease', 'avian disease', 'twisted neck', 'animal infection'],
+    symptomsOrTips: [
+      'Respiratory distress and coughing',
+      'Tremors, twisting, and sudden death in flock',
+      'Common in village and commercial poultry systems'
+    ]
+  },
 
   // --- NUTRIENT DEFICIENCIES & SOIL ---
   {
@@ -473,28 +512,132 @@ export const AGRICULTURAL_IMAGES: AgriImage[] = [
 export function findMatchingAgriImages(query: string, maxResults: number = 3): AgriImage[] {
   const normalized = query.toLowerCase().trim();
   const words = normalized.split(/\s+/).filter(w => w.length > 2);
+  const animalDiseaseTarget = /(lumpy skin disease|lump skin disease|lsd|foot and mouth disease|fmd|newcastle disease|avian disease|twisted neck)/.test(normalized);
+  const cropTarget = /(maize|tomato|cassava|potato|banana|cabbage|rice|wheat|sorghum|sweet potato|groundnut|beans|crop|plant|leaf)/.test(normalized);
+  const animalTarget = /(cattle|cow|calf|chicken|poultry|goat|sheep|livestock|herd|animal)/.test(normalized);
+  const cropAliases: Record<string, string[]> = {
+    maize: ['maize', 'corn', 'zea mays', 'chibage', 'umbila'],
+    tomato: ['tomato', 'tomatoes', 'matamatisi', 'mhodzi'],
+    potato: ['potato', 'irish potato', 'potatoes'],
+    cassava: ['cassava', 'manioc', 'tapioca', 'muhogo'],
+    banana: ['banana', 'plantain', 'bananas'],
+    cabbage: ['cabbage', 'rape', 'leafy green'],
+    beans: ['beans', 'cowpea', 'cowpeas', 'soybean', 'soya', 'legume'],
+    rice: ['rice', 'paddy', 'mupunga'],
+    wheat: ['wheat', 'wheat crop'],
+    sorghum: ['sorghum', 'mabele', 'mapfunde'],
+    sweetpotato: ['sweet potato', 'sweetpotato', 'mbambaira'],
+    groundnut: ['groundnut', 'peanut', 'nuts'],
+    cattle: ['cattle', 'cow', 'beef cattle', 'dairy cattle', 'calf', 'cow herd'],
+    chicken: ['chicken', 'poultry', 'chickens', 'fowl', 'bird'],
+    goat: ['goat', 'goats', 'sheep', 'small ruminant']
+  };
+
+  const deficiencyHints = {
+    nitrogen: ['nitrogen', 'n deficiency', 'yellow lower leaves', 'v shape yellow', 'pale green', 'slow growth'],
+    phosphorus: ['phosphorus', 'purple leaves', 'poor roots', 'stunted root'],
+    potassium: ['potassium', 'leaf scorch', 'brown margins', 'potash'],
+    calcium: ['calcium', 'blossom end rot', 'black bottom', 'fruit tip rot'],
+    iron: ['iron', 'yellow young leaves', 'interveinal chlorosis', 'chlorosis']
+  };
+
+  const diseaseHints = ['disease', 'blight', 'mildew', 'rust', 'leaf spot', 'mosaic', 'wilt', 'fungus', 'virus', 'rot', 'spot', 'lumpy', 'nodules', 'lesions'];
+  const exactDiseaseAliases: Record<string, string[]> = {
+    'lumpy skin disease': ['lumpy skin disease', 'lump skin disease', 'lsd', 'skin nodules', 'cattle lumps', 'cattle lesion'],
+    'foot and mouth disease': ['foot and mouth disease', 'fmd', 'mouth lesions', 'hoof lesions'],
+    'newcastle disease': ['newcastle disease', 'poultry disease', 'twisted neck', 'avian disease'],
+    'maize streak virus': ['maize streak virus', 'msv', 'yellow streaks', 'parallel streaks'],
+    'late blight': ['late blight', 'potato blight', 'greasy lesions'],
+    'early blight': ['early blight', 'target spot', 'concentric rings'],
+    'powdery mildew': ['powdery mildew', 'white powder'],
+    'bacterial wilt': ['bacterial wilt', 'green wilt', 'wilting while green']
+  };
 
   const scored = AGRICULTURAL_IMAGES.map(img => {
     let score = 0;
+    const imgText = `${img.title} ${img.tags.join(' ')}`.toLowerCase();
 
-    // Exact title or id match
-    if (normalized.includes(img.id.replace(/-/g, ' ')) || img.title.toLowerCase().includes(normalized)) {
-      score += 15;
+    if (animalDiseaseTarget && !/(cattle|cow|calf|chicken|poultry|goat|sheep|livestock|animal|herd)/.test(imgText) && !/(lumpy skin|foot and mouth|newcastle)/.test(imgText)) {
+      score -= 999;
     }
 
-    // Tag matches
+    if (cropTarget && !animalTarget && !/(maize|tomato|cassava|potato|banana|cabbage|rice|wheat|sorghum|sweet potato|groundnut|beans|leaf|plant|crop)/.test(imgText) && img.category !== 'technique') {
+      score -= 999;
+    }
+
+    if (normalized.includes(img.id.replace(/-/g, ' ')) || img.title.toLowerCase().includes(normalized)) {
+      score += 18;
+    }
+
     for (const tag of img.tags) {
       if (normalized.includes(tag.toLowerCase())) {
-        score += 8;
+        score += 10;
       }
     }
 
-    // Word matches across title, description, and tags
+    for (const [aliasKey, aliasValues] of Object.entries(exactDiseaseAliases)) {
+      if (normalized.includes(aliasKey) || aliasValues.some(v => normalized.includes(v))) {
+        const titleMatches = img.title.toLowerCase().includes(aliasKey) || aliasValues.some(v => img.title.toLowerCase().includes(v));
+        const tagMatches = img.tags.some(tag => aliasValues.some(v => tag.toLowerCase().includes(v)) || tag.toLowerCase().includes(aliasKey));
+        if (titleMatches || tagMatches) {
+          score += 22;
+        }
+      }
+    }
+
     for (const word of words) {
       if (img.title.toLowerCase().includes(word)) score += 4;
       if (img.tags.some(t => t.toLowerCase().includes(word))) score += 3;
       if (img.description.toLowerCase().includes(word)) score += 1;
     }
+
+    const cropMatches = Object.entries(cropAliases).filter(([, aliases]) =>
+      aliases.some(alias => normalized.includes(alias.toLowerCase()))
+    );
+
+    for (const [, aliases] of cropMatches) {
+      const cropHit = aliases.some(alias => img.title.toLowerCase().includes(alias.toLowerCase()) || img.tags.some(tag => tag.toLowerCase().includes(alias.toLowerCase())));
+      if (cropHit) score += 12;
+      if (img.category === 'deficiency' && cropHit) score += 8;
+      if (img.category === 'disease' && cropHit && diseaseHints.some(hint => normalized.includes(hint))) score += 6;
+    }
+
+    if (img.category === 'deficiency') {
+      for (const [nutrient, hints] of Object.entries(deficiencyHints)) {
+        if (hints.some(hint => normalized.includes(hint))) {
+          score += 16;
+          if (img.title.toLowerCase().includes(nutrient)) score += 8;
+        }
+      }
+    }
+
+    if (img.category === 'disease' && diseaseHints.some(hint => normalized.includes(hint))) {
+      score += 8;
+    }
+
+    if (normalized.includes('affected by') || normalized.includes('animal with') || normalized.includes('animal showing')) {
+      if (img.category === 'disease' || img.category === 'livestock') score += 12;
+      if (img.title.toLowerCase().includes('cattle') || img.tags.some(tag => tag.toLowerCase().includes('cattle') || tag.toLowerCase().includes('poultry') || tag.toLowerCase().includes('chicken'))) {
+        score += 8;
+      }
+    }
+
+    if (/(lumpy skin disease|lump skin disease|lsd)/.test(normalized)) {
+      if (img.id === 'lumpy-skin-disease-cattle') score += 40;
+      if (img.title.toLowerCase().includes('lumpy skin disease')) score += 30;
+    }
+
+    if (/(foot and mouth disease|fmd)/.test(normalized)) {
+      if (img.id === 'foot-and-mouth-cattle') score += 40;
+      if (img.title.toLowerCase().includes('foot and mouth')) score += 30;
+    }
+
+    if (/(newcastle disease|avian disease|twisted neck)/.test(normalized)) {
+      if (img.id === 'newcastle-disease-chickens') score += 40;
+      if (img.title.toLowerCase().includes('newcastle')) score += 30;
+    }
+
+    if (normalized.includes('healthy') && img.category === 'crop') score += 4;
 
     return { img, score };
   });
@@ -503,6 +646,19 @@ export function findMatchingAgriImages(query: string, maxResults: number = 3): A
     .filter(item => item.score > 0)
     .sort((a, b) => b.score - a.score)
     .map(item => item.img);
+
+  const directDiseaseMatches = matched.filter(img => {
+    const text = `${img.title} ${img.tags.join(' ')}`.toLowerCase();
+    return /(lumpy skin disease|lump skin disease|lsd|foot and mouth disease|fmd|newcastle disease|avian disease|twisted neck)/.test(text);
+  });
+
+  if (directDiseaseMatches.length > 0) {
+    return directDiseaseMatches.slice(0, 1);
+  }
+
+  if (animalDiseaseTarget && matched.length > 0) {
+    return matched.filter(img => /(cattle|cow|calf|chicken|poultry|goat|sheep|livestock|animal|herd|lumpy skin|foot and mouth|newcastle)/.test(`${img.title} ${img.tags.join(' ')}`.toLowerCase())).slice(0, 1);
+  }
 
   return matched.slice(0, maxResults);
 }

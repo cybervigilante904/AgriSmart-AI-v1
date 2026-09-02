@@ -1948,11 +1948,17 @@ function Scanner({ language }: { language: Language }) {
           First decide: is this a crop, a plant, an animal, an insect, a disease symptom, a nutrient problem, or none of these?
           If the image is not clearly a farm-related subject, set subjectType to Unknown and tell the farmer: "This photo does not look like a crop, plant, animal, insect, or disease picture. Please retake the photo or upload a picture of the affected crop or animal."
           For unrelated pictures, do not guess. Keep confidence low and do not suggest treatment. Just ask for a proper farm photo.
+          If the image is blurry, low-light, or a close-up of a whole scene without a clear target, say it is unclear and ask for a close-up of the actual affected leaf, stem, fruit, or animal area.
 
           For crops and plants, look for disease, pest damage, nutrient problems, or healthy growth. If the crop looks weak, pale, yellow, curled, stunted, or leaf-discoloured, consider nutrient deficiency and identify the likely missing nutrient such as N, P, K, Mg, Fe, Zn, Ca, S, B, or Mo.
+          For maize, tomatoes, potatoes, cassava, banana, rice, beans, vegetables, and other cereals, distinguish nutrient deficiency from fungal disease by noting whether the pattern is on old leaves, young leaves, margins, stems, roots, or with spots/lesions.
+          Use these exact disease cues: early blight = concentric ring spots; late blight = greasy dark lesions and fuzzy growth; powdery mildew = white powdery coating; brown rust = orange or rusty pustules; bacterial wilt = sudden wilting while leaves stay green; maize streak = yellow streaks on leaf veins; cassava mosaic = mottled yellow-green patches and distortion.
           For animals, check for disease, infection, parasite, injury, poor feeding, or healthy condition. Think of cattle, goats, sheep, pigs, poultry, and rabbits.
           If the picture is unclear, say so honestly and suggest a proper farm or veterinary check.
           For disease outbreaks or zoonotic risk, advise isolation and early veterinary help.
+
+          IMPORTANT: when a nutrient issue is likely, diagnosis.name should be an exact deficiency name like "Nitrogen Deficiency" or "Potassium Deficiency", and advisory should include a simple smallholder and large-farm treatment path in the same sentence.
+          Also, if the request or image clearly needs a real-world reference, include a relevant crop or disease image from the agricultural reference set in the returned image list to help the farmer compare symptoms.
 
           IMPORTANT FOR NUTRIENT DEFICIENCIES:
           - Recognize common signs like yellowing leaves, interveinal chlorosis, purple leaves, weak growth, poor tillering, curling, or poor fruiting.
@@ -3576,10 +3582,10 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-natural-accent flex items-center gap-1.5">
                       <ImageIcon size={14} className="text-natural-gold" />
-                      {t.visualReference} ({m.images.length})
+                      {m.images.length === 1 ? t.relevantImageMatch : `${t.visualReference} (${m.images.length})`}
                     </span>
                     <span className="text-[10px] text-natural-text/50 font-medium italic">
-                      Tap photo to zoom & inspect
+                      {m.images.length === 1 ? t.imageMatchSubtitle : t.tapPhotoToZoom}
                     </span>
                   </div>
 
