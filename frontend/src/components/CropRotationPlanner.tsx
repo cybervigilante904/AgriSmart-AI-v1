@@ -37,7 +37,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const GEMINI_CHAT_MODEL = 'gemini-2.5-flash';
+const GEMINI_CHAT_MODEL = 'gemini-3.6-flash';
 
 let ai: GoogleGenAI | null = null;
 function getAI(): GoogleGenAI {

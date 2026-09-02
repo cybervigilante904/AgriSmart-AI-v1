@@ -39,7 +39,8 @@ import {
   type MarketCommodity, 
   type RegionalMarketHub, 
   getMarketHubForLocation, 
-  getAllMarketHubs 
+  getAllMarketHubs,
+  refreshMarketSnapshot
 } from '../../../shared/marketData';
 
 interface MarketPricesViewProps {
@@ -58,62 +59,102 @@ export function MarketPricesView({ language, profile, onOpenLocationModal }: Mar
   const [allHubs, setAllHubs] = useState<RegionalMarketHub[]>([]);
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
   const [calculatorQuantity, setCalculatorQuantity] = useState<string>('10');
+  const [lastUpdated, setLastUpdated] = useState<string>('');
 
   // Load available market hubs
   useEffect(() => {
-    setAllHubs(getAllMarketHubs());
+    setAllHubs(refreshMarketSnapshot(getAllMarketHubs()));
   }, []);
+
+  const marketPulse = React.useMemo(() => {
+    const marketItems = allHubs.flatMap((hub) =>
+      hub.commodities.map((commodity) => ({
+        ...commodity,
+        hubName: hub.name,
+        hubId: hub.id,
+      }))
+    );
+
+    const mover = [...marketItems].sort((a, b) => {
+      const aVal = parseFloat(a.changePercent.replace(/[+%\-]/g, ''));
+      const bVal = parseFloat(b.changePercent.replace(/[+%\-]/g, ''));
+      return bVal - aVal;
+    })[0];
+
+    const averageChange = marketItems.length
+      ? marketItems.reduce((sum, item) => sum + parseFloat(item.changePercent.replace(/[+%\-]/g, '')), 0) / marketItems.length
+      : 0;
+
+    return {
+      topMover: mover,
+      averageChange,
+      marketCount: allHubs.length,
+    };
+  }, [allHubs]);
 
   // Fetch or resolve market data whenever profile location or chosen hub changes
   const loadMarketData = () => {
     setLoading(true);
     const targetLocation = profile?.region || profile?.country || 'Harare';
     const targetCountry = profile?.country || 'Zimbabwe';
+    const profileHub = getMarketHubForLocation(targetLocation, targetCountry);
+    const liveHubs = refreshMarketSnapshot(getAllMarketHubs());
+    setAllHubs(liveHubs);
 
-    // If user explicitly picked a market hub from dropdown
-    if (customHubId) {
-      const matched = allHubs.find(h => h.id === customHubId) || getMarketHubForLocation(targetLocation, targetCountry);
-      setHub(matched);
-      setCommodities(matched.commodities);
-      if (!selectedCommodity || !matched.commodities.some(c => c.crop === selectedCommodity.crop)) {
-        setSelectedCommodity(matched.commodities[0]);
+    const applyHub = (marketHub: RegionalMarketHub) => {
+      const refreshed = refreshMarketSnapshot([marketHub])[0];
+      setHub(refreshed);
+      setCommodities(refreshed.commodities);
+      if (!selectedCommodity || !refreshed.commodities.some(c => c.crop === selectedCommodity.crop)) {
+        setSelectedCommodity(refreshed.commodities[0]);
       }
+    };
+
+    if (customHubId) {
+      const matched = liveHubs.find(h => h.id === customHubId) || profileHub;
+      const sameCountry = matched.country.toLowerCase() === targetCountry.toLowerCase() || matched.district.toLowerCase() === targetLocation.toLowerCase();
+      const resolvedHub = sameCountry ? matched : profileHub;
+      applyHub(resolvedHub);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       setLoading(false);
       return;
     }
 
-    // Otherwise fetch from server API with local fallback
     fetch(`/api/market/${encodeURIComponent(targetLocation)}?country=${encodeURIComponent(targetCountry)}`)
       .then(res => res.json())
       .then(data => {
         if (data.hub && data.commodities) {
-          setHub(data.hub);
-          setCommodities(data.commodities);
-          if (!selectedCommodity || !data.commodities.some((c: MarketCommodity) => c.crop === selectedCommodity.crop)) {
-            setSelectedCommodity(data.commodities[0]);
-          }
+          const hubFromApi = data.hub as RegionalMarketHub;
+          const hubCountryMatch = hubFromApi.country?.toLowerCase() === targetCountry.toLowerCase();
+          const hubRegionMatch = hubFromApi.district?.toLowerCase() === targetLocation.toLowerCase() || hubFromApi.name?.toLowerCase().includes(targetLocation.toLowerCase());
+          const resolvedHub = hubCountryMatch || hubRegionMatch ? hubFromApi : profileHub;
+          applyHub(resolvedHub);
         } else if (Array.isArray(data)) {
-          // Fallback structure
-          const fallbackHub = getMarketHubForLocation(targetLocation, targetCountry);
-          setHub(fallbackHub);
-          setCommodities(fallbackHub.commodities);
-          setSelectedCommodity(fallbackHub.commodities[0]);
+          applyHub(profileHub);
+        } else {
+          applyHub(profileHub);
         }
       })
       .catch(err => {
         console.warn('Using client-side market data fallback:', err);
-        const fallbackHub = getMarketHubForLocation(targetLocation, targetCountry);
-        setHub(fallbackHub);
-        setCommodities(fallbackHub.commodities);
-        setSelectedCommodity(fallbackHub.commodities[0]);
+        applyHub(profileHub);
       })
       .finally(() => {
         setLoading(false);
+        setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       });
   };
 
   useEffect(() => {
     loadMarketData();
+  }, [profile?.region, profile?.country, customHubId]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      loadMarketData();
+    }, 60000);
+
+    return () => window.clearInterval(id);
   }, [profile?.region, profile?.country, customHubId]);
 
   const userLocationLabel = profile?.region 
@@ -126,9 +167,9 @@ export function MarketPricesView({ language, profile, onOpenLocationModal }: Mar
     : 0;
 
   return (
-    <div className="p-4 space-y-6 pb-28 h-full overflow-y-auto">
+    <div className="p-4 md:p-5 space-y-5 pb-28 h-full overflow-y-auto bg-gradient-to-b from-stone-50 via-white to-emerald-50/30">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/90 backdrop-blur-sm rounded-[28px] border border-natural-accent/10 p-4 shadow-[0_12px_30px_rgba(24,39,35,0.05)]">
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-2xl font-serif font-bold text-natural-primary">{t.market}</h2>
@@ -141,9 +182,14 @@ export function MarketPricesView({ language, profile, onOpenLocationModal }: Mar
           </p>
         </div>
 
+        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-natural-primary bg-stone-50 rounded-full px-3 py-2 border border-natural-accent/10 shadow-sm">
+          <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
+          <span>Updated {lastUpdated || 'just now'}</span>
+        </div>
+
         {/* Location & Market Hub Selector */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 bg-white px-3.5 py-2.5 rounded-2xl border border-natural-accent/15 shadow-sm text-xs">
+          <div className="flex items-center gap-1.5 bg-stone-50 px-3.5 py-2.5 rounded-2xl border border-natural-accent/10 shadow-sm text-xs">
             <MapPin size={14} className="text-natural-accent shrink-0" />
             <select
               value={customHubId || (hub ? hub.id : '')}
@@ -170,10 +216,10 @@ export function MarketPricesView({ language, profile, onOpenLocationModal }: Mar
 
       {/* Active Market Hub Banner */}
       {hub && (
-        <div className="bg-gradient-to-r from-natural-primary to-natural-primary/90 p-5 rounded-[32px] text-white shadow-xl relative overflow-hidden">
+        <div className="bg-gradient-to-r from-natural-primary to-natural-primary/95 p-5 rounded-[28px] text-white shadow-[0_18px_40px_rgba(18,45,31,0.18)] relative overflow-hidden">
           <div className="absolute right-0 top-0 w-48 h-48 bg-white/5 rounded-full blur-2xl pointer-events-none" />
-          
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+
+          <div className="grid gap-4 md:grid-cols-[1.5fr_0.8fr] relative z-10">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Building2 size={16} className="text-natural-gold" />
@@ -192,23 +238,43 @@ export function MarketPricesView({ language, profile, onOpenLocationModal }: Mar
               </p>
             </div>
 
-            <div className="flex items-center gap-3 bg-white/10 p-3 rounded-2xl border border-white/10 backdrop-blur-md self-start md:self-auto">
-              <div className="text-right">
-                <p className="text-[9px] font-bold uppercase text-white/60">Your Farm Region</p>
-                <p className="text-xs font-bold text-white line-clamp-1">{userLocationLabel}</p>
+            <div className="grid grid-cols-2 gap-2 bg-white/10 p-3 rounded-2xl border border-white/10 backdrop-blur-md self-start md:self-auto">
+              <div className="rounded-xl bg-white/5 px-2 py-2">
+                <p className="text-[9px] font-black uppercase text-white/60">Markets</p>
+                <p className="text-sm font-black text-white">{marketPulse.marketCount}</p>
               </div>
-              {onOpenLocationModal && (
-                <button
-                  onClick={onOpenLocationModal}
-                  className="px-3 py-1.5 bg-white text-natural-primary rounded-xl text-[11px] font-bold shadow-sm hover:bg-natural-bg transition-colors"
-                >
-                  Change
-                </button>
-              )}
+              <div className="rounded-xl bg-white/5 px-2 py-2">
+                <p className="text-[9px] font-black uppercase text-white/60">Avg move</p>
+                <p className={`text-sm font-black ${marketPulse.averageChange >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {marketPulse.averageChange >= 0 ? '+' : ''}{marketPulse.averageChange.toFixed(1)}%
+                </p>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-white rounded-[24px] border border-natural-accent/15 p-4 shadow-[0_10px_24px_rgba(23,32,26,0.04)]">
+          <p className="text-[10px] uppercase tracking-wider font-black text-natural-accent">Top mover</p>
+          <p className="mt-2 text-sm font-bold text-natural-primary">{marketPulse.topMover?.crop || 'No data'}</p>
+          <p className={`mt-1 text-xs font-black ${marketPulse.topMover?.trend === 'up' ? 'text-emerald-700' : marketPulse.topMover?.trend === 'down' ? 'text-red-700' : 'text-stone-700'}`}>
+            {marketPulse.topMover?.changePercent || '0.0%'} in {marketPulse.topMover?.hubName || 'market'}
+          </p>
+        </div>
+
+        <div className="bg-white rounded-[24px] border border-natural-accent/15 p-4 shadow-[0_10px_24px_rgba(23,32,26,0.04)]">
+          <p className="text-[10px] uppercase tracking-wider font-black text-natural-accent">National coverage</p>
+          <p className="mt-2 text-sm font-bold text-natural-primary">{allHubs.length} wholesale hubs</p>
+          <p className="mt-1 text-xs text-natural-text/60">Zimbabwe, Zambia, Kenya, Malawi, South Africa</p>
+        </div>
+
+        <div className="bg-white rounded-[24px] border border-natural-accent/15 p-4 shadow-[0_10px_24px_rgba(23,32,26,0.04)]">
+          <p className="text-[10px] uppercase tracking-wider font-black text-natural-accent">Best selling window</p>
+          <p className="mt-2 text-sm font-bold text-natural-primary">{selectedCommodity?.bestTimeToSell || 'Market dependent'}</p>
+          <p className="mt-1 text-xs text-natural-text/60">Updated from live commodity momentum</p>
+        </div>
+      </div>
 
       {/* Commodity Quick Selector Tabs */}
       <div className="flex gap-2 overflow-x-auto pb-1">

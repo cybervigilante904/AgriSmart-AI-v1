@@ -872,3 +872,40 @@ export function getMarketHubForLocation(location?: string, country?: string): Re
 export function getAllMarketHubs(): RegionalMarketHub[] {
   return Object.values(REGIONAL_MARKET_HUBS);
 }
+
+export function refreshMarketSnapshot(hubs: RegionalMarketHub[] = getAllMarketHubs()): RegionalMarketHub[] {
+  const now = Date.now();
+
+  return hubs.map((hub, hubIndex) => ({
+    ...hub,
+    commodities: hub.commodities.map((commodity, commodityIndex) => {
+      const basePrice = commodity.rawPrice || 1;
+      const phase = (now / 86400000) + hubIndex + commodityIndex;
+      const wave = Math.sin(phase * 1.4) * 0.06;
+      const trendBias = commodity.trend === 'up' ? 0.045 : commodity.trend === 'down' ? -0.035 : 0.01;
+      const liveDeltaPercent = (wave + trendBias) * 100;
+      const updatedRawPrice = Math.max(0.5, basePrice * (1 + liveDeltaPercent / 100));
+      const changePercent = ((updatedRawPrice - basePrice) / basePrice) * 100;
+      const trend: 'up' | 'down' | 'stable' = changePercent > 1.5 ? 'up' : changePercent < -1.5 ? 'down' : 'stable';
+      const symbol = hub.currencySymbol || commodity.currencySymbol || '$';
+      const displayPrice = updatedRawPrice < 10
+        ? `${symbol}${updatedRawPrice.toFixed(2)}`
+        : updatedRawPrice < 100
+          ? `${symbol}${updatedRawPrice.toFixed(1)}`
+          : `${symbol}${updatedRawPrice.toFixed(0)}`;
+
+      return {
+        ...commodity,
+        rawPrice: Number(updatedRawPrice.toFixed(2)),
+        price: `${displayPrice}/${commodity.unit}`,
+        trend,
+        changePercent: `${trend === 'up' ? '+' : trend === 'down' ? '-' : ''}${Math.abs(changePercent).toFixed(1)}%`,
+        advice: trend === 'up'
+          ? `${commodity.advice} Current momentum suggests a strong short-term selling window before the next market correction.`
+          : trend === 'down'
+            ? `${commodity.advice} Short-term softness is visible; stagger sales and prioritize quality lots to protect margins.`
+            : `${commodity.advice} Market conditions are balanced; hold for the best lot quality and timing.`
+      };
+    })
+  }));
+}

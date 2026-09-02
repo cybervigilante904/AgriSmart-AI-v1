@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import dotenv from "dotenv";
+import { GoogleGenAI } from "@google/genai";
 import { AGRICULTURAL_IMAGES, findMatchingAgriImages, isImageRequest, type AgriImage } from "../shared/agriculturalImages";
 import { getMarketHubForLocation, getAllMarketHubs } from "../shared/marketData";
 import { initializeDatabase, registerUser, loginUser, verifyToken, getUserById, updateUserProfile, requestPasswordReset, resetPasswordWithCode } from "./auth.js";
@@ -8,9 +9,74 @@ import { initializeDatabase, registerUser, loginUser, verifyToken, getUserById, 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
 
-const GEMINI_CHAT_MODEL = process.env.GEMINI_MODEL || process.env.GEMINI_CHAT_MODEL || "gemini-2.5-flash";
-const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image-preview";
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash";
+const DEFAULT_GEMINI_CHAT_MODEL = "gemini-3.6-flash";
+const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image-preview";
+const DEFAULT_OPENROUTER_MODEL = "google/gemini-2.5-flash";
+
+const GEMINI_CHAT_MODEL = (process.env.GEMINI_MODEL || process.env.GEMINI_CHAT_MODEL || DEFAULT_GEMINI_CHAT_MODEL).replace(/^models\//, "");
+const GEMINI_IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || DEFAULT_GEMINI_IMAGE_MODEL).replace(/^models\//, "");
+const OPENROUTER_MODEL = (process.env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL).replace(/^models\//, "");
+
+function resolveLocationContext(location?: string) {
+  const value = (location || '').trim();
+  if (!value || value === 'Harare, Zimbabwe' || value === 'Unknown' || value === 'General African farm context') {
+    return 'general African farm context';
+  }
+  return value;
+}
+
+let ai: GoogleGenAI | null = null;
+function getAI(): GoogleGenAI {
+  if (!ai) {
+    const apiKey = process.env.GEMINI_API_KEY?.trim();
+    if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
+    ai = new GoogleGenAI({ apiKey });
+  }
+  return ai;
+}
+
+function buildConversationalFallbackReply(userText: string, location: string, language: string) {
+  const text = userText.trim();
+  const normalized = text.toLowerCase();
+  const locationContext = resolveLocationContext(location);
+  const locationNote = locationContext === 'general African farm context' ? '' : ` in ${locationContext}`;
+
+  if (!normalized || ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"].some(v => normalized === v || normalized.startsWith(v))) {
+    return `Hello! I’m AgriSmart AI, your farm advisor. I can help with crop health, fertilizer planning, pest control, irrigation, soil management, planting dates, and market decisions${locationNote}. Ask me anything and I’ll give you practical guidance.`;
+  }
+
+  const lower = text.toLowerCase();
+  const cropGuess = /(maize|corn|tomato|potato|cassava|banana|cabbage|beans|rice|wheat|onion|pepper|soybean|sorghum|sweet potato|groundnut|tea|coffee)/i.test(lower) ? text.match(/(maize|corn|tomato|potato|cassava|banana|cabbage|beans|rice|wheat|onion|pepper|soybean|sorghum|sweet potato|groundnut|tea|coffee)/i)?.[0] : 'your crop';
+
+  if (/nitrogen|n deficiency|lack of nitrogen|yellow older leaves|nitrogen deficient|nitrogen deficiency/.test(lower)) {
+    return `Likely issue: Nitrogen deficiency in ${cropGuess}.\n\nSymptoms: pale green to yellow lower leaves, slow growth, thin stems, small leaves, and reduced yields.\n\nRecommended action: apply a balanced nitrogen source such as urea or composted manure, side-dress in split applications, and irrigate soon after application. For smallholders, apply well-decomposed manure plus a top dressing when crops are actively growing.\n\nPrevention: do soil testing, rotate legumes, and avoid overwatering or leaching.\n\nIf you share the crop stage and leaf color pattern, I can narrow the recommendation further.`;
+  }
+
+  if (/phosphorus|p deficiency|phosphorus deficiency|purple leaves|poor rooting/.test(lower)) {
+    return `Likely issue: Phosphorus deficiency in ${cropGuess}.\n\nSymptoms: dark green or purple leaves, weak roots, delayed maturity, and poor flowering or fruit set.\n\nRecommended action: apply rock phosphate, TSP/DAP, or compost rich in phosphorus at planting, and ensure the root zone is moist. Avoid placing fertilizer too far from the root zone.\n\nPrevention: maintain organic matter, use phosphorus-efficient rotations, and avoid highly acidic or waterlogged soils.`;
+  }
+
+  if (/potassium|k deficiency|potash|marginal leaf burn|leaf edge scorch/.test(lower)) {
+    return `Likely issue: Potassium deficiency in ${cropGuess}.\n\nSymptoms: yellowing or scorching along leaf edges, weak stalks, poor stress tolerance, and lower fruit quality.\n\nRecommended action: apply potassium-rich fertilizer such as MOP or wood ash in moderation, plus balanced irrigation. Use foliar feeding only as a short-term correction, not the main strategy.\n\nPrevention: keep soil organic matter high and avoid excessive removal of crop residue.`;
+  }
+
+  if (/iron|fe deficiency|chlorosis|yellow young leaves|interveinal chlorosis/.test(lower)) {
+    return `Likely issue: Iron deficiency in ${cropGuess}.\n\nSymptoms: yellowing between leaf veins on young leaves while veins stay green, reduced vigor, and slow growth.\n\nRecommended action: apply chelated iron or a foliar iron spray, correct high pH soils where possible, and improve drainage.\n\nPrevention: avoid excessive liming, keep soil pH in the suitable range, and monitor crops under high heat or water stress.`;
+  }
+
+  if (/(powdery mildew|rust|leaf spot|blight|anthracnose|fusarium|bacterial wilt|downy mildew|late blight|early blight)/.test(lower)) {
+    const disease = /(powdery mildew|rust|leaf spot|blight|anthracnose|fusarium|bacterial wilt|downy mildew|late blight|early blight)/i.exec(lower)?.[0] || 'crop disease';
+    return `${disease.charAt(0).toUpperCase() + disease.slice(1)} is a common problem in many African farms.\n\nTypical signs: leaf spots, yellow halos, necrotic patches, powdery growth, wilting, or lesions spreading rapidly across the canopy.\n\nWhat to do immediately: remove infected leaves, avoid overhead watering, increase air circulation, and reduce dense foliage. For chemical control, use a crop-approved fungicide registered for the target disease; for organic systems, use neem, copper sprays, and resistant varieties where available.\n\nLong-term prevention: rotate crops, use clean seed, improve spacing, and keep field sanitation strong.\n\nShare the crop type and the exact symptom pattern if you want a more precise treatment plan.`;
+  }
+
+  if (/(nutrient|deficiency|fertility|yellowing|chlorosis|wilting|poor growth)/.test(lower)) {
+    return `This pattern sounds like a crop nutrition or stress issue in ${cropGuess}.\n\nCheck these first:\n- leaf color pattern: older leaves vs young leaves\n- soil moisture and drainage\n- crop stage and recent fertilizer timing\n- signs of root damage, weeds, or pests\n\nCommon fixes:\n- add the missing nutrient in the correct form\n- use balanced NPK with organic matter\n- correct watering and drainage\n- do soil testing before heavy applications\n\nIf you tell me the crop, the exact leaf symptom, and whether the problem is on old or new leaves, I can identify the most likely nutrient deficiency and the best remedy.`;
+  }
+
+  const topic = text.split(/\s+/).slice(0, 8).join(' ');
+
+  return `Thanks for asking about “${topic}”. I can help with that${locationNote}. For practical field advice, I would check the crop type, crop stage, leaf and root symptoms, recent rainfall, soil moisture, and whether the problem is caused by disease, nutrient stress, or pest damage.\n\nA good response framework is: \n- identify the symptom clearly\n- separate nutrient stress from pest or disease\n- correct the cause quickly\n- protect the crop with prevention measures\n\nIf you share the crop name, the symptom, and whether it is on young or old leaves, I can give you a more accurate diagnosis and treatment plan.`;
+}
 
 let groqClient: { apiKey: string } | null = null;
 function getGroq(): { apiKey: string } | null {
@@ -33,6 +99,72 @@ async function callGroq(messages: any[], model: string = "llama-3.1-8b-instant",
     },
     body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 }),
   });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || null;
+}
+
+async function callOpenRouterChat(systemPrompt: string, userText: string, messages: any[] = []) {
+  const key = process.env.OPENROUTER_API_KEY?.trim();
+  if (!key) return null;
+
+  const normalizedMessages = [
+    { role: "system", content: systemPrompt },
+    ...messages.slice(-6).map((m: any) => ({
+      role: m.role === "user" ? "user" : "assistant",
+      content: typeof m.content === "string" ? m.content : String(m.content ?? "")
+    })),
+    { role: "user", content: userText }
+  ];
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://agrismart-ai.local",
+      "X-Title": "AgriSmart AI"
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: normalizedMessages,
+      temperature: 0.7,
+      max_tokens: 1200
+    })
+  });
+
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || null;
+}
+
+async function callGroqChat(systemPrompt: string, userText: string, messages: any[] = []) {
+  const groq = getGroq();
+  if (!groq) return null;
+
+  const normalizedMessages = [
+    { role: "system", content: systemPrompt },
+    ...messages.slice(-6).map((m: any) => ({
+      role: m.role === "user" ? "user" : "assistant",
+      content: typeof m.content === "string" ? m.content : String(m.content ?? "")
+    })),
+    { role: "user", content: userText }
+  ];
+
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${groq.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "llama-3.1-8b-instant",
+      messages: normalizedMessages,
+      max_tokens: 1200,
+      temperature: 0.7
+    })
+  });
+
   if (!res.ok) return null;
   const data = await res.json();
   return data.choices?.[0]?.message?.content || null;
@@ -194,16 +326,22 @@ async function startServer() {
       let replyText = "";
       let aiGeneratedImage: { url: string; title: string; description: string } | null = null;
 
+      const locationContext = resolveLocationContext(location);
       const systemPrompt = `You are AgriSmart AI, an expert Southern African agricultural advisor specializing in crops, pests, plant pathology, soil health, drip irrigation, livestock, and agronomy for smallholder and commercial farmers.
 Current Language: ${language}
-Farmer Location: ${location}
+Farmer Location: ${locationContext}
+
+Instruction: If the user does not provide a specific location, answer using general African farm best-practice advice without requesting location first. Always answer the actual question asked, not only a location-based response.
 
 Formatting Rules:
 - Keep advice practical, actionable, and cost-effective.
-- If the user asks about or needs to visualize any pest, disease, weed, deficiency, farming technique, or crop:
-  1. Clearly describe the visual physical characteristics and symptoms so the farmer knows exactly what to look for in their fields.
-  2. Provide step-by-step organic/cultural management practices and chemical control if necessary.
-  3. Mention that visual image reference cards have been attached below for easy identification.
+- Answer the actual question directly even if no location is provided; never force a location before giving useful crop advice.
+- If the user asks about disease, deficiency, pest, or crop health:
+  1. Name the likely issue, the visible symptoms, and which plant part is affected.
+  2. State the most likely cause and the field-level actions to take within the next 24–72 hours.
+  3. Give both preventive and corrective measures, including organic and registered chemical options where relevant.
+  4. If relevant, tell the farmer how to distinguish nutrient deficiency from disease or pest damage.
+- If the user asks about a specific crop, tailor the answer to that crop and its common African growing challenges.
 - Reply in ${language}.`;
 
       if (ai) {
@@ -229,18 +367,27 @@ Formatting Rules:
           });
 
           replyText = response.text || "";
-        } catch (genError) {
+        } catch (genError: any) {
           console.error("Gemini Chat generation error:", genError);
+          const errorText = String(genError?.message || genError || "");
+          if (errorText.includes("429") || errorText.includes("quota") || errorText.includes("RESOURCE_EXHAUSTED") || errorText.includes("gemini-2.5-flash") || errorText.includes("NOT_FOUND") || errorText.includes("404")) {
+            console.warn("Falling back to supported AI providers for chat response.");
+          }
         }
       }
 
-      // Fallback response if Gemini generation failed or key wasn't available
+      if (!replyText) {
+        const preferredFallback = await callOpenRouterChat(systemPrompt, userText, messages) || await callGroqChat(systemPrompt, userText, messages);
+        replyText = preferredFallback || "";
+      }
+
+      // Fallback response if all providers fail or key wasn't available
       if (!replyText) {
         if (needsImage && matchedImages.length > 0) {
           const topMatch = matchedImages[0];
           replyText = `Here is visual information on **${topMatch.title}**:\n\n${topMatch.description}\n\n**Key Symptoms & Tips:**\n${topMatch.symptomsOrTips?.map(s => `- ${s}`).join('\n') || '- Inspect plants regularly for early signs.'}\n\nCheck the visual photo reference below.`;
         } else {
-          replyText = `Thank you for your question. For agricultural advice in ${location}, please inspect your crops for early symptoms, ensure balanced irrigation, and consult local extension officers.`;
+          replyText = buildConversationalFallbackReply(userText, location, language);
         }
       }
 

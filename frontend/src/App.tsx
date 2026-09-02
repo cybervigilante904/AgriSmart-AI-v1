@@ -104,7 +104,7 @@ import {
 import { GoogleGenAI } from "@google/genai";
 
 // Initialize Gemini only when a key is configured so the offline UI can still load.
-const GEMINI_CHAT_MODEL = 'gemini-2.5-flash';
+const GEMINI_CHAT_MODEL = 'gemini-3.6-flash';
 
 let ai: GoogleGenAI | null = null;
 function getAI(): GoogleGenAI {
@@ -598,39 +598,42 @@ export default function App() {
   );
 }
 
+const COUNTRY_FLAGS: Record<string, string> = {
+  'zimbabwe': '🇿🇼',
+  'kenya': '🇰🇪',
+  'south africa': '🇿🇦',
+  'nigeria': '🇳🇬',
+  'tanzania': '🇹🇿',
+  'uganda': '🇺🇬',
+  'zambia': '🇿🇲',
+  'ghana': '🇬🇭',
+  'malawi': '🇲🇼',
+  'ethiopia': '🇪🇹',
+  'rwanda': '🇷🇼',
+  'botswana': '🇧🇼',
+  'mozambique': '🇲🇿',
+  'namibia': '🇳🇦',
+  'angola': '🇦🇴',
+  'cameroon': '🇨🇲',
+  'senegal': '🇸🇳',
+  'ivory coast': '🇨🇮',
+  'burkina faso': '🇧🇫',
+  'mali': '🇲🇱',
+  'united kingdom': '🇬🇧',
+  'uk': '🇬🇧',
+  'usa': '🇺🇸',
+  'united states': '🇺🇸',
+  'canada': '🇨🇦',
+  'australia': '🇦🇺',
+  'india': '🇮🇳',
+  'brazil': '🇧🇷',
+  'mexico': '🇲🇽'
+};
+
 function getCountryFlag(countryName?: string | null): string {
   if (!countryName) return '🌍';
-  const normalized = countryName.toLowerCase();
-  const flags: Record<string, string> = {
-    'zimbabwe': '🇿🇼',
-    'kenya': '🇰🇪',
-    'south africa': '🇿🇦',
-    'nigeria': '🇳🇬',
-    'tanzania': '🇹🇿',
-    'uganda': '🇺🇬',
-    'zambia': '🇿🇲',
-    'ghana': '🇬🇭',
-    'malawi': '🇲🇼',
-    'ethiopia': '🇪🇹',
-    'rwanda': '🇷🇼',
-    'botswana': '🇧🇼',
-    'mozambique': '🇲🇿',
-    'namibia': '🇳🇦',
-    'angola': '🇦🇴',
-    'cameroon': '🇨🇲',
-    'senegal': '🇸🇳',
-    'ivory coast': '🇨🇮',
-    'burkina faso': '🇧🇫',
-    'mali': '🇲🇱',
-    'united kingdom': '🇬🇧',
-    'usa': '🇺🇸',
-    'canada': '🇨🇦',
-    'australia': '🇦🇺',
-    'india': '🇮🇳',
-    'brazil': '🇧🇷',
-    'mexico': '🇲🇽'
-  };
-  return flags[normalized] || '🌍';
+  const normalized = countryName.toLowerCase().trim();
+  return COUNTRY_FLAGS[normalized] || '🌍';
 }
 
 function SettingsModal({ 
@@ -3283,7 +3286,11 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
   const [generatingForMsgId, setGeneratingForMsgId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const farmLocation = `${profile?.region || 'Harare'}, ${profile?.country || 'Zimbabwe'}`;
+  const farmLocation = profile?.region && profile?.country
+    ? `${profile.region}, ${profile.country}`
+    : profile?.country
+      ? profile.country
+      : 'General African farm context';
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -3365,8 +3372,10 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
       }
 
       try {
-        const chatPrompt = `Respond as an expert Southern African agricultural advisor for a farmer in ${farmLocation}.
+        const locationContext = farmLocation && farmLocation !== 'General African farm context' ? ` for a farmer in ${farmLocation}` : '';
+        const chatPrompt = `Respond as an expert Southern African agricultural advisor${locationContext}.
         Language: ${language}. Keep advice practical, actionable, and low-cost.
+        If no exact location is provided, answer with general African farm best-practice advice that works for most farming situations.
         ${checkNeedImage ? 'The user is requesting visual/photo guidance. Describe what the plant/pest looks like in detail and refer to the attached visual card.' : ''}
         User message: ${queryText}`;
 
@@ -3391,11 +3400,17 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
       } catch (clientErr) {
         console.error("Local Gemini fallback also failed:", clientErr);
         
-        let offlineReply = `**AgriSmart Advisory (${language})**\n\nFor your question regarding **${queryText}**, please monitor crop conditions closely in **${farmLocation}**.\n\n`;
-        if (localImages.length > 0) {
-          offlineReply += `Visual reference card for **${localImages[0].title}** is attached below.\n\n**Visual Symptoms & Tips:**\n${localImages[0].symptomsOrTips?.map(s => `- ${s}`).join('\n') || '- Inspect leaves regularly.'}`;
+        const normalized = queryText.trim().toLowerCase();
+        let offlineReply = `**AgriSmart Advisory (${language})**\n\n`;
+
+        const locationHint = farmLocation && farmLocation !== 'General African farm context' ? ` for **${farmLocation}**` : '';
+
+        if (!normalized || ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening'].some(v => normalized === v || normalized.startsWith(v))) {
+          offlineReply += `Hello! I’m your AgriSmart farm advisor. I can help with crop health, pests, soil fertility, irrigation, planting windows, and market decisions${locationHint}. Ask me anything and I’ll respond with practical, field-ready guidance.`;
+        } else if (localImages.length > 0) {
+          offlineReply += `Thanks for asking about **${queryText}**. A visual reference card for **${localImages[0].title}** is attached below.\n\n**What to look for:**\n${localImages[0].symptomsOrTips?.map(s => `- ${s}`).join('\n') || '- Inspect leaves regularly.'}\n\n**Best next step:** check the crop stage, moisture, and recent weather, then apply the most suitable management practice.`;
         } else {
-          offlineReply += `Ensure adequate soil moisture, crop scouting every 3 days, and consult your local Agritex extension officer.`;
+          offlineReply += `Thanks for asking about **${queryText}**. The best next step is to look at the crop stage, local weather, and the exact symptom you are seeing${locationHint}.\n\nI recommend: \n- inspect leaves, stems, roots, and soil moisture\n- confirm if the issue is pest, disease, nutrient stress, or watering imbalance\n- use the most suitable local control or prevention strategy\n- keep records and monitor changes after treatment.`;
         }
 
         setMessages(prev => [...prev, {
