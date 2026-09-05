@@ -7,6 +7,9 @@ export interface AuthUser {
   language: string;
   country?: string;
   region?: string;
+  address?: string;
+  phoneNumber?: string;
+  cellPhoneNumber?: string;
   profileImageUrl?: string;
 }
 
@@ -25,27 +28,35 @@ interface AuthContextType {
     phoneCountryCode?: string,
     phoneNumber?: string,
     recoveryQuestion?: string,
-    recoveryAnswer?: string
+      recoveryAnswer?: string,
+      profileImageUrl?: string,
+      address?: string,
+      cellPhoneNumber?: string
   ) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateProfile: (data: Partial<AuthUser>) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AUTH_SESSION_DURATION_MS = 4 * 24 * 60 * 60 * 1000;
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load stored auth on mount
   useEffect(() => {
     const storedToken = localStorage.getItem('authToken');
-    if (storedToken) {
-      verifyStoredToken(storedToken);
-    } else {
+    const storedAt = Number(localStorage.getItem('authTokenStoredAt'));
+
+    if (!storedToken || !storedAt || Date.now() - storedAt >= AUTH_SESSION_DURATION_MS) {
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('authTokenStoredAt');
       setIsLoading(false);
+      return;
     }
+
+    verifyStoredToken(storedToken);
   }, []);
 
   const verifyStoredToken = async (storedToken: string) => {
@@ -62,10 +73,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setToken(storedToken);
       } else {
         localStorage.removeItem('authToken');
+        localStorage.removeItem('authTokenStoredAt');
       }
     } catch (error) {
       console.error('Token verification failed:', error);
       localStorage.removeItem('authToken');
+      localStorage.removeItem('authTokenStoredAt');
     } finally {
       setIsLoading(false);
     }
@@ -88,6 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(data.user);
       setToken(data.token);
       localStorage.setItem('authToken', data.token);
+      localStorage.setItem('authTokenStoredAt', String(Date.now()));
       if (data.user?.profileImageUrl) {
         localStorage.setItem('agriSmartProfileImage', data.user.profileImageUrl);
       }
@@ -108,7 +122,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     phoneCountryCode?: string,
     phoneNumber?: string,
     recoveryQuestion?: string,
-    recoveryAnswer?: string
+    recoveryAnswer?: string,
+    profileImageUrl?: string,
+    address?: string,
+    cellPhoneNumber?: string
   ) => {
     try {
       const response = await fetch('/api/auth/register', {
@@ -124,7 +141,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           phoneCountryCode,
           phoneNumber,
           recoveryQuestion,
-          recoveryAnswer
+          recoveryAnswer,
+          profileImageUrl,
+          address,
+          cellPhoneNumber
         })
       });
 
@@ -146,6 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setToken(null);
     localStorage.removeItem('authToken');
+    localStorage.removeItem('authTokenStoredAt');
     localStorage.removeItem('agriSmartProfileImage');
   };
 

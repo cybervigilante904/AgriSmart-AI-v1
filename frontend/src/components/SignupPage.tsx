@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../AuthContext';
 import { motion } from 'motion/react';
-import { Mail, Lock, User, Loader2, Eye, EyeOff, AlertCircle, CheckCircle2, Smartphone, ShieldQuestion, Globe } from 'lucide-react';
+import { Mail, Lock, User, Loader2, Eye, EyeOff, AlertCircle, CheckCircle2, Smartphone, ShieldQuestion, Globe, Camera, MapPin } from 'lucide-react';
 import { type Language } from '../translations';
 
 interface SignupProps {
@@ -15,9 +15,12 @@ export function SignupPage({ onSuccess, onSwitchToLogin }: SignupProps) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
   const [language, setLanguage] = useState<Language>('English');
   const [phoneCountryCode, setPhoneCountryCode] = useState('+263');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [cellPhoneNumber, setCellPhoneNumber] = useState('');
+  const [profileImageUrl, setProfileImageUrl] = useState('');
   const [recoveryQuestion, setRecoveryQuestion] = useState('');
   const [recoveryAnswer, setRecoveryAnswer] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -36,6 +39,22 @@ export function SignupPage({ onSuccess, onSwitchToLogin }: SignupProps) {
     const pwd = e.target.value;
     setPassword(pwd);
     checkPasswordStrength(pwd);
+  };
+
+  const handleProfileImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Profile picture must be an image file.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError('Profile picture must be smaller than 2 MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setProfileImageUrl(String(reader.result));
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -58,13 +77,28 @@ export function SignupPage({ onSuccess, onSwitchToLogin }: SignupProps) {
       return;
     }
 
+    if (!profileImageUrl) {
+      setError('A profile picture is required');
+      return;
+    }
+
+    if (!address.trim()) {
+      setError('Address is required');
+      return;
+    }
+
+    if (!phoneNumber.trim()) {
+      setError('WhatsApp number is required');
+      return;
+    }
+
     if (!recoveryQuestion.trim() || !recoveryAnswer.trim()) {
       setError('Set a recovery question and answer for account backup protection.');
       return;
     }
 
     setIsLoading(true);
-    const result = await register(email, password, name, language, undefined, undefined, phoneCountryCode, phoneNumber, recoveryQuestion, recoveryAnswer);
+    const result = await register(email, password, name, language, undefined, undefined, phoneCountryCode, phoneNumber, recoveryQuestion, recoveryAnswer, profileImageUrl, address, cellPhoneNumber);
 
     if (result.success) {
       onSuccess?.();
@@ -129,6 +163,27 @@ export function SignupPage({ onSuccess, onSwitchToLogin }: SignupProps) {
             </div>
           </div>
 
+          {/* Required profile details */}
+          <div className="space-y-3 pt-2 border-t border-natural-accent/10">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-widest text-natural-accent block mb-1">Profile Picture *</label>
+              <label className="flex items-center gap-3 p-3 bg-natural-tan/20 border border-dashed border-natural-accent/30 rounded-lg cursor-pointer hover:bg-natural-tan/40 transition-colors">
+                {profileImageUrl ? <img src={profileImageUrl} alt="Profile preview" className="w-12 h-12 rounded-full object-cover" /> : <span className="w-12 h-12 rounded-full bg-natural-tan flex items-center justify-center text-natural-primary"><Camera size={20} /></span>}
+                <span className="text-xs text-natural-text/70">{profileImageUrl ? 'Change profile picture' : 'Upload a clear profile picture'}</span>
+                <input type="file" accept="image/*" onChange={handleProfileImageChange} className="hidden" required={!profileImageUrl} />
+              </label>
+              <p className="text-[10px] text-natural-text/50 mt-1">Image files only, maximum 2 MB.</p>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-widest text-natural-accent block mb-1">Address *</label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-natural-accent/40" />
+                <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Village, town, or full address" className="w-full pl-10 pr-3 py-2 text-sm bg-natural-tan/20 border border-natural-accent/20 rounded-lg focus:outline-none focus:border-natural-primary transition-colors" required />
+              </div>
+            </div>
+          </div>
+
           {/* Email Input */}
           <div>
             <label className="text-xs font-bold uppercase tracking-widest text-natural-accent block mb-1">
@@ -165,10 +220,10 @@ export function SignupPage({ onSuccess, onSwitchToLogin }: SignupProps) {
             </select>
           </div>
 
-          {/* Phone Recovery Section */}
+          {/* Contact numbers */}
           <div className="space-y-2 pt-2 border-t border-natural-accent/10">
             <label className="text-xs font-bold uppercase tracking-widest text-natural-accent block">
-              Recovery contact
+              WhatsApp number *
             </label>
 
             <div className="grid grid-cols-[110px_1fr] gap-2">
@@ -206,8 +261,13 @@ export function SignupPage({ onSuccess, onSwitchToLogin }: SignupProps) {
                   onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
                   placeholder="712345678"
                   className="w-full pl-9 pr-3 py-2 text-sm bg-natural-tan/20 border border-natural-accent/20 rounded-lg focus:outline-none focus:border-natural-primary transition-colors"
+                  required
                 />
               </div>
+            </div>
+            <div className="relative">
+              <Smartphone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-natural-accent/40" />
+              <input type="tel" value={cellPhoneNumber} onChange={(e) => setCellPhoneNumber(e.target.value.replace(/\D/g, ''))} placeholder="Cell phone number (optional)" className="w-full pl-9 pr-3 py-2 text-sm bg-natural-tan/20 border border-natural-accent/20 rounded-lg focus:outline-none focus:border-natural-primary transition-colors" />
             </div>
           </div>
 

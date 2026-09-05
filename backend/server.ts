@@ -2,19 +2,16 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
-import { AGRICULTURAL_IMAGES, findMatchingAgriImages, isImageRequest, type AgriImage } from "../shared/agriculturalImages";
 import { getMarketHubForLocation, getAllMarketHubs } from "../shared/marketData";
-import { initializeDatabase, registerUser, loginUser, verifyToken, getUserById, updateUserProfile, requestPasswordReset, resetPasswordWithCode } from "./auth.js";
+import { initializeDatabase, registerUser, loginUser, verifyToken, getUserById, updateUserProfile, requestPasswordReset, resetPasswordWithCode, getDatabase } from "./auth.js";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
 
 const DEFAULT_GEMINI_CHAT_MODEL = "gemini-3.6-flash";
-const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image-preview";
 const DEFAULT_OPENROUTER_MODEL = "google/gemini-2.5-flash";
 
 const GEMINI_CHAT_MODEL = (process.env.GEMINI_MODEL || process.env.GEMINI_CHAT_MODEL || DEFAULT_GEMINI_CHAT_MODEL).replace(/^models\//, "");
-const GEMINI_IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || DEFAULT_GEMINI_IMAGE_MODEL).replace(/^models\//, "");
 const OPENROUTER_MODEL = (process.env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL).replace(/^models\//, "");
 
 function resolveLocationContext(location?: string) {
@@ -420,7 +417,7 @@ async function startServer() {
 
 
 
-  // AI Chat endpoint with automated visual identification and image generation
+  // AI Chat endpoint for agricultural advice
   app.post("/api/chat", async (req, res) => {
     try {
       const { messages = [], query, language = "English", location = "Harare, Zimbabwe" } = req.body;
@@ -430,17 +427,8 @@ async function startServer() {
         return res.status(400).json({ error: "Query or message is required" });
       }
 
-      const needsImage = isImageRequest(userText);
-      const needsAgronomicVisual = /(yellowing|chlorosis|blight|mildew|rust|mosaic|wilt|leaf spot|deficiency|nutrient|disease|pest|symptom)/i.test(userText);
-      let matchedImages: AgriImage[] = [];
-
-      if (needsImage || needsAgronomicVisual) {
-        matchedImages = findMatchingAgriImages(userText, 2);
-      }
-
       const ai = getAI();
       let replyText = "";
-      let aiGeneratedImage: { url: string; title: string; description: string } | null = null;
 
       const locationContext = resolveLocationContext(location);
       const systemPrompt = `You are AgriSmart AI, an expert Southern African agricultural advisor specializing in crops, pests, plant pathology, soil health, drip irrigation, livestock, and agronomy for smallholder and commercial farmers.
@@ -497,134 +485,17 @@ Formatting Rules:
         replyText = preferredFallback || "";
       }
 
-      // Fallback response if all providers fail or key wasn't available
+      // Fallback response if all providers fail or no key is configured.
       if (!replyText) {
-        if (needsImage && matchedImages.length > 0) {
-          const topMatch = matchedImages[0];
-          replyText = `Here is visual information on **${topMatch.title}**:\n\n${topMatch.description}\n\n**Key Symptoms & Tips:**\n${topMatch.symptomsOrTips?.map(s => `- ${s}`).join('\n') || '- Inspect plants regularly for early signs.'}\n\nCheck the visual photo reference below.`;
-        } else {
-          replyText = buildConversationalFallbackReply(userText, location, language);
-        }
-      }
-
-      // If user explicitly asked for an image and no database image matched, or if they requested custom AI generation
-      const isExplicitGenRequest = /generate (an |a )?image|draw|create (a |an )?picture|paint/i.test(userText);
-      if (isExplicitGenRequest && ai && matchedImages.length === 0) {
-        try {
-          const imageRes = await ai.models.generateContent({
-            model: GEMINI_IMAGE_MODEL,
-            contents: {
-              parts: [
-                {
-                  text: `High quality, clear photorealistic agricultural guide image for African farming: ${userText}`
-                }
-              ]
-            }
-          });
-
-          for (const part of imageRes.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData?.data) {
-              aiGeneratedImage = {
-                url: `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`,
-                title: `AI Visual: ${userText.slice(0, 40)}`,
-                description: `Generated agricultural reference visual based on your query.`
-              };
-              break;
-            }
-          }
-        } catch (imgError) {
-          console.warn("AI Image generation unavailable, using curated reference:", imgError);
-        }
-      }
-
-      // Format final images array
-      const responseImages = [];
-      if (aiGeneratedImage) {
-        responseImages.push({
-          id: 'ai-gen-' + Date.now(),
-          title: aiGeneratedImage.title,
-          category: 'technique' as const,
-          description: aiGeneratedImage.description,
-          url: aiGeneratedImage.url,
-          tags: ['ai-generated'],
-          isAiGenerated: true
-        });
-      }
-
-      for (const img of matchedImages) {
-        responseImages.push(img);
+        replyText = buildConversationalFallbackReply(userText, location, language);
       }
 
       return res.json({
-        reply: replyText,
-        images: responseImages,
-        needsImage
+        reply: replyText
       });
     } catch (err: any) {
       console.error("Chat endpoint error:", err);
       return res.status(500).json({ error: "Failed to process chat request", details: err.message });
-    }
-  });
-
-  // Dedicated Image Generation Endpoint
-  app.post("/api/generate-image", async (req, res) => {
-    try {
-      const { prompt } = req.body;
-      if (!prompt) {
-        return res.status(400).json({ error: "Prompt is required" });
-      }
-
-      const ai = getAI();
-      if (ai) {
-        try {
-          const response = await ai.models.generateContent({
-            model: GEMINI_IMAGE_MODEL,
-            contents: {
-              parts: [
-                {
-                  text: `Clear, detailed, photorealistic agricultural photograph showing: ${prompt}. African farming context, natural lighting, highly educational.`
-                }
-              ]
-            }
-          });
-
-          for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData?.data) {
-              return res.json({
-                imageUrl: `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`,
-                isAiGenerated: true,
-                prompt
-              });
-            }
-          }
-        } catch (e: any) {
-          console.warn("Gemini image generation fallback triggered:", e.message);
-        }
-      }
-
-      // Fallback to closest curated high-res image
-      const matches = findMatchingAgriImages(prompt, 1);
-      if (matches.length > 0) {
-        return res.json({
-          imageUrl: matches[0].url,
-          title: matches[0].title,
-          description: matches[0].description,
-          isAiGenerated: false,
-          fallback: true
-        });
-      }
-
-      // Generic agricultural fallback
-      return res.json({
-        imageUrl: "https://images.unsplash.com/photo-1551754655-cd27e38d2076?auto=format&fit=crop&w=1200&q=80",
-        title: "Agricultural Reference Visual",
-        description: "Standard crop reference image.",
-        isAiGenerated: false,
-        fallback: true
-      });
-    } catch (error: any) {
-      console.error("Generate image endpoint error:", error);
-      return res.status(500).json({ error: "Failed to generate image" });
     }
   });
 
@@ -651,60 +522,7 @@ Formatting Rules:
     createdAt: number;
   }
 
-  let communityPosts: CommunityPost[] = [
-    {
-      id: "post-1",
-      author: "Tendai Moyo",
-      region: "Mazowe, Mashonaland Central",
-      category: "Tip",
-      crop: "Maize",
-      title: "Pfumvudza Mulching Tip for High Temperatures",
-      content: "After yesterday's 31°C heat, our Pfumvudza basins retained excellent moisture because of 10cm dry grass mulch. Make sure you don't use green weeds with seeds as mulch!",
-      likes: 24,
-      replies: [
-        {
-          id: "rep-1",
-          author: "Farai Chitepo",
-          region: "Goromonzi",
-          content: "Great advice Tendai! Grass mulch has cut our watering requirement in half.",
-          createdAt: Date.now() - 3600000 * 5
-        }
-      ],
-      createdAt: Date.now() - 3600000 * 24
-    },
-    {
-      id: "post-2",
-      author: "Nomsa Dube",
-      region: "Lupane, Matabeleland North",
-      category: "Question",
-      crop: "Sorghum",
-      title: "Early signs of Stem Borer vs Fall Armyworm?",
-      content: "Noticing small pin-holes in the upper leaves of SV-2 Sorghum. Is this stem borer or early armyworm? What bio-pesticide works best without harming honeybees?",
-      likes: 18,
-      replies: [
-        {
-          id: "rep-2",
-          author: "Dr. Sibanda (Agronomist)",
-          region: "Bulawayo",
-          content: "Stem borer leaves regular window panes in straight lines. Mix fine dry wood ash with chili powder in the whorl early morning.",
-          createdAt: Date.now() - 3600000 * 12
-        }
-      ],
-      createdAt: Date.now() - 3600000 * 36
-    },
-    {
-      id: "post-3",
-      author: "Kiprono Bett",
-      region: "Eldoret, Uasin Gishu",
-      category: "Market Alert",
-      crop: "Irish Potatoes",
-      title: "High wholesale demand for Dutch Robjin variety",
-      content: "Buyers in Eldoret town market paying KSh 3,800 per 90kg bag today for clean graded potatoes. High demand expected through end of the week.",
-      likes: 31,
-      replies: [],
-      createdAt: Date.now() - 3600000 * 48
-    }
-  ];
+  let communityPosts: CommunityPost[] = [];
 
   app.get("/api/community", (_req, res) => {
     res.json(communityPosts);
@@ -767,6 +585,241 @@ Formatting Rules:
       return res.status(201).json(reply);
     }
     return res.status(404).json({ error: "Post not found" });
+  });
+
+  // Community chat uses SSE so connected farmers receive messages immediately
+  // without adding another realtime dependency to the server.
+  type ChatClient = { id: number; res: express.Response };
+  const chatClients: ChatClient[] = [];
+  const ensureChatMember = (user: any) => {
+    getDatabase().prepare(`INSERT OR IGNORE INTO community_chat_members (user_id, joined_at) VALUES (?, ?)`)
+      .run(user.id, Date.now());
+    return user;
+  };
+  const getChatUser = (req: express.Request) => {
+    const token = (req.body?.token || req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.token) as string | undefined;
+    if (!token) return null;
+    try {
+      const decoded = verifyToken(token);
+      if (!decoded) return null;
+      const user = getUserById(decoded.userId);
+      return user ? ensureChatMember(user) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const getPrivateConversationMembers = (conversationId: number) => {
+    return getDatabase().prepare(`SELECT user_id FROM community_chat_conversation_members WHERE conversation_id = ?`).all(conversationId).map((row: any) => row.user_id as number);
+  };
+
+  const getOrCreatePrivateConversation = (userId: number, otherUserId: number) => {
+    const database = getDatabase();
+    const existing = database.prepare(`
+      SELECT c.id FROM community_chat_conversations c
+      JOIN community_chat_conversation_members mine ON mine.conversation_id = c.id AND mine.user_id = ?
+      JOIN community_chat_conversation_members other ON other.conversation_id = c.id AND other.user_id = ?
+      WHERE c.kind = 'private'
+      LIMIT 1
+    `).get(userId, otherUserId) as { id: number } | undefined;
+    if (existing) return existing.id;
+    const result = database.prepare(`INSERT INTO community_chat_conversations (kind, created_at) VALUES ('private', ?)`).run(Date.now());
+    const conversationId = Number(result.lastInsertRowid);
+    database.prepare(`INSERT INTO community_chat_conversation_members (conversation_id, user_id) VALUES (?, ?), (?, ?)`).run(conversationId, userId, conversationId, otherUserId);
+    return conversationId;
+  };
+
+  app.get("/api/community-chat/members", (req, res) => {
+    if (!getChatUser(req)) return res.status(401).json({ error: "Authentication required" });
+    const members = getDatabase().prepare(`
+      SELECT u.id, u.name, u.region, u.profile_image_url AS profileImageUrl, m.joined_at AS joinedAt
+      FROM community_chat_members m JOIN users u ON u.id = m.user_id
+      ORDER BY u.name COLLATE NOCASE ASC
+    `).all().map((member: any) => ({ ...member, online: chatClients.some(client => client.id === member.id) }));
+    res.json(members);
+  });
+  const broadcastChat = (event: string, payload: unknown, recipientIds?: number[]) => {
+    const data = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+    chatClients.forEach(({ id, res }) => {
+      if (!recipientIds || recipientIds.includes(id)) res.write(data);
+    });
+  };
+  const serializeChatMessage = (row: any) => ({
+    id: String(row.id),
+    conversationId: Number(row.conversation_id || 0),
+    userId: row.user_id,
+    author: row.author,
+    authorProfileImageUrl: row.author_profile_image_url || undefined,
+    authorRegion: row.author_region || undefined,
+    content: row.content || '',
+    isDeleted: Boolean(row.deleted_at),
+    attachment: row.attachment_name ? {
+      name: row.attachment_name,
+      type: row.attachment_type,
+      dataUrl: row.attachment_data
+    } : undefined,
+    replyToId: row.reply_to_id ? String(row.reply_to_id) : undefined,
+    reactions: JSON.parse(row.reactions || '{}'),
+    readBy: getDatabase().prepare(`
+      SELECT u.id, u.name, u.profile_image_url AS profileImageUrl, r.read_at AS readAt
+      FROM community_chat_message_reads r JOIN users u ON u.id = r.user_id
+      WHERE r.message_id = ? ORDER BY r.read_at ASC
+    `).all(row.id),
+    createdAt: row.created_at
+  });
+
+  app.get("/api/community-chat/private/:userId", (req, res) => {
+    const user = getChatUser(req);
+    if (!user) return res.status(401).json({ error: "Authentication required" });
+    const otherUserId = Number(req.params.userId);
+    const otherUser = getUserById(otherUserId);
+    if (!otherUser || otherUserId === user.id) return res.status(400).json({ error: "Invalid private chat member" });
+    const conversationId = getOrCreatePrivateConversation(user.id, otherUserId);
+    const rows = getDatabase().prepare(`
+      SELECT m.*, u.profile_image_url AS author_profile_image_url, u.region AS author_region
+      FROM community_chat_messages m JOIN users u ON u.id = m.user_id
+      WHERE m.conversation_id = ? ORDER BY m.id ASC LIMIT 100
+    `).all(conversationId);
+    res.json({ conversationId, contact: { id: otherUser.id, name: otherUser.name, region: otherUser.region, profileImageUrl: otherUser.profileImageUrl }, messages: rows.map(serializeChatMessage) });
+  });
+
+  app.get("/api/community-chat", (req, res) => {
+    const user = getChatUser(req);
+    if (!user) return res.status(401).json({ error: "Authentication required" });
+    const rows = getDatabase().prepare(`
+      SELECT m.id, m.user_id, m.author, u.profile_image_url AS author_profile_image_url, u.region AS author_region, m.content, m.attachment_name, m.attachment_type, m.attachment_data, m.reply_to_id, m.reactions, m.deleted_at, m.conversation_id, m.created_at
+      FROM community_chat_messages m
+      JOIN users u ON u.id = m.user_id
+      JOIN community_chat_members member ON member.user_id = ?
+      WHERE m.conversation_id = 0 AND m.created_at >= member.joined_at
+      ORDER BY m.id DESC LIMIT 100
+    `).all(user.id).reverse();
+    res.json(rows.map(serializeChatMessage));
+  });
+
+  app.get("/api/community-chat/stream", (req, res) => {
+    const user = getChatUser(req);
+    if (!user) return res.status(401).end();
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    res.write('event: ready\ndata: {}\n\n');
+    const client = { id: user.id, res };
+    chatClients.push(client);
+    broadcastChat('presence', { userId: user.id, online: true });
+    const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 20000);
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      const index = chatClients.indexOf(client);
+      if (index >= 0) chatClients.splice(index, 1);
+      if (!chatClients.some(activeClient => activeClient.id === user.id)) {
+        broadcastChat('presence', { userId: user.id, online: false });
+      }
+    });
+  });
+
+  app.post("/api/community-chat/typing", (req, res) => {
+    const user = getChatUser(req);
+    if (!user) return res.status(401).json({ error: "Authentication required" });
+    const conversationId = Number(req.body?.conversationId) || 0;
+    const isTyping = Boolean(req.body?.isTyping);
+    const recipients = conversationId > 0 ? getPrivateConversationMembers(conversationId) : undefined;
+    if (conversationId > 0 && !recipients?.includes(user.id)) return res.status(403).json({ error: "You are not a member of this private chat" });
+    broadcastChat('typing', { conversationId, userId: user.id, name: user.name, isTyping }, recipients);
+    res.json({ success: true });
+  });
+
+  app.post("/api/community-chat/messages/:id/read", (req, res) => {
+    const user = getChatUser(req);
+    if (!user) return res.status(401).json({ error: "Authentication required" });
+    const database = getDatabase();
+    const message = database.prepare(`SELECT id, user_id, conversation_id, created_at FROM community_chat_messages WHERE id = ?`).get(req.params.id) as { id: number; user_id: number; conversation_id: number; created_at: number } | undefined;
+    if (!message) return res.status(404).json({ error: "Message not found" });
+    if (message.conversation_id > 0) {
+      if (!getPrivateConversationMembers(message.conversation_id).includes(user.id)) return res.status(403).json({ error: "You are not a member of this private chat" });
+    } else {
+      const member = database.prepare(`SELECT joined_at FROM community_chat_members WHERE user_id = ?`).get(user.id) as { joined_at: number } | undefined;
+      if (!member || message.created_at < member.joined_at) return res.status(403).json({ error: "Message is outside your group history" });
+    }
+    database.prepare(`INSERT OR REPLACE INTO community_chat_message_reads (message_id, user_id, read_at) VALUES (?, ?, ?)`).run(message.id, user.id, Date.now());
+    const reader = { id: user.id, name: user.name, profileImageUrl: user.profileImageUrl, readAt: Date.now() };
+    broadcastChat('read', { messageId: String(message.id), reader }, message.conversation_id > 0 ? getPrivateConversationMembers(message.conversation_id) : undefined);
+    res.json({ success: true, reader });
+  });
+
+  app.post("/api/community-chat/messages", (req, res) => {
+    const user = getChatUser(req);
+    if (!user) return res.status(401).json({ error: "Authentication required" });
+    const { content = '', attachment, replyToId, conversationId = 0 } = req.body || {};
+    const cleanContent = String(content).trim();
+    if (!cleanContent && !attachment?.dataUrl) return res.status(400).json({ error: "Message or attachment is required" });
+    if (cleanContent.length > 4000) return res.status(400).json({ error: "Message is too long" });
+    if (attachment?.dataUrl && (!attachment.name || !attachment.type || !String(attachment.dataUrl).startsWith('data:'))) {
+      return res.status(400).json({ error: "Invalid attachment" });
+    }
+    if (attachment?.dataUrl && String(attachment.dataUrl).length > 8000000) {
+      return res.status(413).json({ error: "Files must be smaller than 6 MB" });
+    }
+    const database = getDatabase();
+    const numericConversationId = Number(conversationId) || 0;
+    if (numericConversationId > 0 && !getPrivateConversationMembers(numericConversationId).includes(user.id)) {
+      return res.status(403).json({ error: "You are not a member of this private chat" });
+    }
+    if (replyToId) {
+      const repliedMessage = database.prepare(`SELECT deleted_at, conversation_id FROM community_chat_messages WHERE id = ?`).get(replyToId) as { deleted_at?: number; conversation_id: number } | undefined;
+      if (!repliedMessage) return res.status(400).json({ error: "Reply target not found" });
+      if (repliedMessage.deleted_at) return res.status(400).json({ error: "Deleted messages cannot be replied to" });
+      if (Number(repliedMessage.conversation_id || 0) !== numericConversationId) return res.status(400).json({ error: "Reply target is outside this chat" });
+    }
+    const result = database.prepare(`
+      INSERT INTO community_chat_messages
+        (user_id, author, content, attachment_name, attachment_type, attachment_data, reply_to_id, conversation_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(user.id, user.name, cleanContent || null, attachment?.name || null, attachment?.type || null, attachment?.dataUrl || null, replyToId ? Number(replyToId) : null, numericConversationId, Date.now());
+    const row = database.prepare(`
+      SELECT m.*, u.profile_image_url AS author_profile_image_url, u.region AS author_region
+      FROM community_chat_messages m JOIN users u ON u.id = m.user_id WHERE m.id = ?
+    `).get(result.lastInsertRowid);
+    const message = serializeChatMessage(row);
+    broadcastChat('message', message, numericConversationId > 0 ? getPrivateConversationMembers(numericConversationId) : undefined);
+    res.status(201).json(message);
+  });
+
+  app.post("/api/community-chat/messages/:id/reactions", (req, res) => {
+    const user = getChatUser(req);
+    if (!user) return res.status(401).json({ error: "Authentication required" });
+    const emoji = String(req.body?.emoji || '').trim();
+    if (!emoji || emoji.length > 8) return res.status(400).json({ error: "Invalid reaction" });
+    const database = getDatabase();
+    const row = database.prepare(`SELECT reactions, deleted_at, conversation_id FROM community_chat_messages WHERE id = ?`).get(req.params.id) as any;
+    if (!row) return res.status(404).json({ error: "Message not found" });
+    if (row.deleted_at) return res.status(400).json({ error: "Deleted messages cannot be reacted to" });
+    const reactions = JSON.parse(row.reactions || '{}') as Record<string, number[]>;
+    const users = reactions[emoji] || [];
+    reactions[emoji] = users.includes(user.id) ? users.filter(id => id !== user.id) : [...users, user.id];
+    database.prepare(`UPDATE community_chat_messages SET reactions = ? WHERE id = ?`).run(JSON.stringify(reactions), req.params.id);
+    const payload = {
+      messageId: String(req.params.id),
+      reactions: Object.fromEntries(Object.entries(reactions).map(([key, ids]) => [key, ids.length])),
+      actorId: user.id,
+      actorName: user.name,
+      emoji
+    };
+    broadcastChat('reaction', payload, Number(row.conversation_id || 0) > 0 ? getPrivateConversationMembers(Number(row.conversation_id)) : undefined);
+    res.json(payload);
+  });
+
+  app.delete("/api/community-chat/messages/:id", (req, res) => {
+    const user = getChatUser(req);
+    if (!user) return res.status(401).json({ error: "Authentication required" });
+    const database = getDatabase();
+    const message = database.prepare(`SELECT id, user_id, conversation_id FROM community_chat_messages WHERE id = ?`).get(req.params.id) as { id: number; user_id: number; conversation_id: number } | undefined;
+    if (!message) return res.status(404).json({ error: "Message not found" });
+    if (message.user_id !== user.id) return res.status(403).json({ error: "You can only delete your own messages" });
+    database.prepare(`UPDATE community_chat_messages SET content = NULL, attachment_name = NULL, attachment_type = NULL, attachment_data = NULL, reactions = '{}', deleted_at = ? WHERE id = ?`).run(Date.now(), req.params.id);
+    broadcastChat('delete', { messageId: String(req.params.id), deletedAt: Date.now() }, Number(message.conversation_id || 0) > 0 ? getPrivateConversationMembers(Number(message.conversation_id)) : undefined);
+    res.json({ success: true, messageId: String(req.params.id) });
   });
 
   app.get("/api/market-hubs", (_req, res) => {
@@ -1492,14 +1545,16 @@ Constraints:
         language,
         country,
         region,
+        address,
         phoneCountryCode,
         phoneNumber,
+        cellPhoneNumber,
         recoveryQuestion,
         recoveryAnswer
       } = req.body;
 
-      if (!email || !password || !name) {
-        return res.status(400).json({ error: "Email, password, and name are required" });
+      if (!email || !password || !name || !address || !phoneNumber || !req.body.profileImageUrl) {
+        return res.status(400).json({ error: "Email, password, name, profile photo, address, and WhatsApp number are required" });
       }
 
       const result = await registerUser(
@@ -1513,7 +1568,9 @@ Constraints:
         phoneNumber,
         recoveryQuestion,
         recoveryAnswer,
-        req.body.profileImageUrl
+        req.body.profileImageUrl,
+        address,
+        cellPhoneNumber
       );
       if (!result.success) {
         return res.status(400).json({ error: result.error });

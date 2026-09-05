@@ -51,6 +51,7 @@ export interface Diagnosis {
 
 export interface FarmerProfile {
   id?: number;
+  accountEmail?: string;
   name: string;
   language: 'English' | 'Shona' | 'Ndebele' | 'Swahili' | 'Zulu';
   country?: string;
@@ -190,6 +191,15 @@ export class AgriSmartDatabase extends Dexie {
     this.version(8).stores({
       diagnoses: '++id, timestamp, healthStatus, synced',
       profiles: '++id, language, synced, country',
+      records: '++id, cropName, status, synced, createdAt',
+      rotations: '++id, timestamp, synced',
+      soilTests: '++id, timestamp',
+      alerts: '++id, alertId, type, severity, triggerDate, isRead, isActioned, region, createdAt',
+      notificationSettings: '++id'
+    });
+    this.version(9).stores({
+      diagnoses: '++id, timestamp, healthStatus, synced',
+      profiles: '++id, accountEmail, language, synced, country',
       records: '++id, cropName, status, synced, createdAt',
       rotations: '++id, timestamp, synced',
       soilTests: '++id, timestamp',

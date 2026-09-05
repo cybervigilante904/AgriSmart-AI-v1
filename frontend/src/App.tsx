@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useAuth } from './AuthContext';
+import { useAuth, type AuthUser } from './AuthContext';
 import { LoginPage } from './components/LoginPage';
 import { SignupPage } from './components/SignupPage';
 import { ForgotPasswordPage } from './components/ForgotPasswordPage';
@@ -82,7 +82,7 @@ import {
   evaluateHeavyRainfallWarnings,
   playNotificationTone 
 } from './notificationScheduler';
-import { AGRICULTURAL_IMAGES, findMatchingAgriImages, isImageRequest, type AgriImage } from '../../shared/agriculturalImages';
+import { AGRICULTURAL_IMAGES } from '../../shared/agriculturalImages';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import Markdown from 'react-markdown';
@@ -214,12 +214,44 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
+      if (!user) {
+        setProfile(null);
+        setLanguage(null);
+        setLoading(false);
+        return;
+      }
+
       try {
-        const savedProfile = await db.profiles.toCollection().first();
-        if (savedProfile) {
-          setProfile(savedProfile);
-          // We don't auto-set language to force the "Language First" step as requested
+        let savedProfile = await db.profiles
+          .where('accountEmail')
+          .equals(user.email)
+          .first();
+        if (!savedProfile) {
+          const legacyProfile = await db.profiles
+            .toCollection()
+            .filter((candidate) => !candidate.accountEmail)
+            .first();
+          if (legacyProfile) {
+            await db.profiles.update(legacyProfile.id!, { accountEmail: user.email });
+            savedProfile = { ...legacyProfile, accountEmail: user.email };
+          }
         }
+        const profile = savedProfile || {
+          accountEmail: user.email,
+          name: user.name,
+          language: (user.language || 'English') as Language,
+          country: user.country || '',
+          region: user.region || '',
+          mainCrops: []
+        };
+
+        if (!savedProfile) {
+          const id = await db.profiles.add(profile);
+          setProfile({ ...profile, id });
+        } else {
+          setProfile(savedProfile);
+        }
+        setLanguage(profile.language as Language);
       } catch (err) {
         console.error("DB Init Error:", err);
       } finally {
@@ -250,7 +282,7 @@ export default function App() {
     };
     window.addEventListener('unhandledrejection', handleRejection);
     return () => window.removeEventListener('unhandledrejection', handleRejection);
-  }, []);
+  }, [user]);
 
   // Show auth pages if not authenticated
   if (authLoading) {
@@ -290,10 +322,12 @@ export default function App() {
       const updatedProfile = { ...profile, language: lang };
       await db.profiles.update(profile.id!, { language: lang });
       setProfile(updatedProfile);
+      await updateProfile({ language: lang });
     } else {
-      const newProfile: FarmerProfile = { name: "Farmer", language: lang, region: "", country: "", mainCrops: [] };
+      const newProfile: FarmerProfile = { accountEmail: user.email, name: user.name, language: lang, region: user.region || "", country: user.country || "", mainCrops: [] };
       const id = await db.profiles.add(newProfile);
       setProfile({ ...newProfile, id });
+      await updateProfile({ language: lang });
     }
     setLanguage(lang);
   };
@@ -303,6 +337,7 @@ export default function App() {
       const updatedProfile = { ...profile, country, region, gpsLocation: gps };
       await db.profiles.update(profile.id!, { country, region, gpsLocation: gps });
       setProfile(updatedProfile);
+      await updateProfile({ country, region });
     }
   };
 
@@ -571,6 +606,8 @@ export default function App() {
         <SettingsModal 
           language={language}
           profile={profile}
+          authUser={user}
+          onUpdateProfile={updateProfile}
           onClose={() => setShowSettingsModal(false)}
           onChangeLanguage={() => {
             setShowSettingsModal(false);
@@ -653,8 +690,8 @@ function SettingsModal({
 }: { 
   language: Language; 
   profile: FarmerProfile | null; 
-  authUser?: { id?: number; name?: string; email?: string; profileImageUrl?: string } | null;
-  onUpdateProfile?: (data: { profileImageUrl?: string }) => Promise<{ success: boolean; error?: string }>;
+  authUser?: AuthUser | null;
+  onUpdateProfile?: (data: Partial<AuthUser>) => Promise<{ success: boolean; error?: string }>;
   onClose: () => void;
   onChangeLanguage: () => void;
   onChangeLocation: () => void;
@@ -668,6 +705,16 @@ function SettingsModal({
   const t = TRANSLATIONS[language];
   const [photoError, setPhotoError] = useState('');
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [detailsError, setDetailsError] = useState('');
+  const [isSavingDetails, setIsSavingDetails] = useState(false);
+  const [details, setDetails] = useState({
+    name: authUser?.name || profile?.name || '',
+    email: authUser?.email || '',
+    address: authUser?.address || '',
+    whatsappNumber: authUser?.phoneNumber || '',
+    cellPhoneNumber: authUser?.cellPhoneNumber || ''
+  });
 
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -700,6 +747,25 @@ function SettingsModal({
   const profileName = authUser?.name || profile?.name || 'Farmer';
   const profileEmail = authUser?.email || 'No email available';
   const profileImage = authUser?.profileImageUrl || localStorage.getItem('agriSmartProfileImage') || '';
+
+  const handleSaveDetails = async () => {
+    if (!details.name.trim() || !details.email.trim() || !details.address.trim() || !details.whatsappNumber.trim()) {
+      setDetailsError('Name, email, address, and WhatsApp number are required.');
+      return;
+    }
+    setIsSavingDetails(true);
+    setDetailsError('');
+    const result = await onUpdateProfile?.({
+      name: details.name.trim(),
+      email: details.email.trim(),
+      address: details.address.trim(),
+      phoneNumber: details.whatsappNumber.trim(),
+      cellPhoneNumber: details.cellPhoneNumber.trim()
+    });
+    setIsSavingDetails(false);
+    if (result?.success) setIsEditingDetails(false);
+    else setDetailsError(result?.error || 'Unable to save account details.');
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -752,7 +818,23 @@ function SettingsModal({
             </div>
             {isUploadingPhoto && <p className="mt-3 text-xs text-natural-primary">Uploading profile photo...</p>}
             {photoError && <p className="mt-3 text-xs text-red-600">{photoError}</p>}
+            <button onClick={() => setIsEditingDetails(value => !value)} className="mt-4 w-full rounded-xl border border-natural-accent/20 bg-white px-3 py-2 text-xs font-bold text-natural-primary hover:bg-natural-tan/30">
+              {isEditingDetails ? 'Close account details' : 'Edit account details'}
+            </button>
           </div>
+
+          {isEditingDetails && (
+            <div className="rounded-[24px] border border-natural-accent/15 bg-white p-5 space-y-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-natural-primary">Account details</p>
+              {detailsError && <p className="text-xs text-red-600">{detailsError}</p>}
+              <input value={details.name} onChange={event => setDetails(current => ({ ...current, name: event.target.value }))} placeholder="Full name" className="w-full rounded-xl border border-natural-accent/20 bg-natural-tan/15 px-3 py-2 text-sm outline-none focus:border-natural-primary" />
+              <input type="email" value={details.email} onChange={event => setDetails(current => ({ ...current, email: event.target.value }))} placeholder="Email address" className="w-full rounded-xl border border-natural-accent/20 bg-natural-tan/15 px-3 py-2 text-sm outline-none focus:border-natural-primary" />
+              <input value={details.address} onChange={event => setDetails(current => ({ ...current, address: event.target.value }))} placeholder="Address" className="w-full rounded-xl border border-natural-accent/20 bg-natural-tan/15 px-3 py-2 text-sm outline-none focus:border-natural-primary" />
+              <input type="tel" value={details.whatsappNumber} onChange={event => setDetails(current => ({ ...current, whatsappNumber: event.target.value.replace(/\D/g, '') }))} placeholder="WhatsApp number" className="w-full rounded-xl border border-natural-accent/20 bg-natural-tan/15 px-3 py-2 text-sm outline-none focus:border-natural-primary" />
+              <input type="tel" value={details.cellPhoneNumber} onChange={event => setDetails(current => ({ ...current, cellPhoneNumber: event.target.value.replace(/\D/g, '') }))} placeholder="Cell phone number (optional)" className="w-full rounded-xl border border-natural-accent/20 bg-natural-tan/15 px-3 py-2 text-sm outline-none focus:border-natural-primary" />
+              <button onClick={handleSaveDetails} disabled={isSavingDetails} className="w-full rounded-xl bg-natural-primary px-3 py-2.5 text-xs font-bold text-white disabled:opacity-50">{isSavingDetails ? 'Saving...' : 'Save account details'}</button>
+            </div>
+          )}
 
           {/* Notification Scheduler Shortcuts */}
           <div className="bg-amber-50/70 p-5 rounded-[28px] border border-amber-200/80 space-y-3">
@@ -3276,21 +3358,41 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   content: string;
-  images?: AgriImage[];
   timestamp?: number;
-  isGeneratingImage?: boolean;
 }
 
 function AgriChat({ language, profile }: { language: Language; profile: FarmerProfile | null }) {
   const t = TRANSLATIONS[language];
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [requestVisuals, setRequestVisuals] = useState(false);
-  const [inspectingImage, setInspectingImage] = useState<AgriImage | null>(null);
-  const [generatingForMsgId, setGeneratingForMsgId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const storageKey = `agriSmartAdvisorChat:${profile?.accountEmail || profile?.name || 'local'}`;
+
+  useEffect(() => {
+    try {
+      const savedMessages = localStorage.getItem(storageKey);
+      if (savedMessages) {
+        const parsedMessages = JSON.parse(savedMessages) as ChatMessage[];
+        if (Array.isArray(parsedMessages)) setMessages(parsedMessages);
+      }
+    } catch (error) {
+      console.warn('Advisor chat history could not be loaded:', error);
+    } finally {
+      setHistoryLoaded(true);
+    }
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!historyLoaded) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(messages));
+    } catch (error) {
+      console.warn('Advisor chat history could not be saved:', error);
+    }
+  }, [historyLoaded, messages, storageKey]);
 
   const farmLocation = profile?.region && profile?.country
     ? `${profile.region}, ${profile.country}`
@@ -3306,17 +3408,7 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
     scrollToBottom();
   }, [messages, loading]);
 
-  const QUICK_PROMPTS = [
-    { label: "🐛 Fall Armyworm", query: "Show me what Fall Armyworm caterpillar looks like on maize and how to control it" },
-    { label: "🍂 Tomato Early Blight", query: "Show me tomato early blight symptoms and photo reference" },
-    { label: "💧 Drip Irrigation Setup", query: "Show me a drip irrigation layout diagram and water saving tips" },
-    { label: "🌱 Nitrogen Deficiency", query: "Show me how nitrogen deficiency looks on maize leaves" },
-    { label: "🪱 Compost Layering", query: "Show me how to layer a thermal compost pile with pictures" },
-    { label: "🚜 Pfumvudza Basins", query: "Show me Pfumvudza conservation agriculture planting basins" },
-    { label: "🌽 Mature Maize Cob", query: "Show me healthy mature maize cobs and harvest maturity signs" }
-  ];
-
-  const handleSend = async (text: string = input, forceImage: boolean = requestVisuals) => {
+  const handleSend = async (text: string = input) => {
     if (!text.trim()) return;
     const queryText = text.trim();
     const userMsgId = 'user-' + Date.now();
@@ -3331,10 +3423,8 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
     setInput('');
     setLoading(true);
 
-    const checkNeedImage = forceImage || isImageRequest(queryText);
-
     try {
-      // Primary: Server-side API with Gemini & visual routing
+      // Primary: Server-side agricultural advice chat.
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3343,24 +3433,17 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
           messages: messages.map(m => ({ role: m.role, content: m.content })),
           language,
           location: farmLocation,
-          requestedImage: checkNeedImage
+          requestedImage: false
         })
       });
 
       if (res.ok) {
         const data = await res.json();
-        let deliveredImages: AgriImage[] = data.images || [];
-
-        // If user asked for an image and server returned none, check client database
-        if (checkNeedImage && deliveredImages.length === 0) {
-          deliveredImages = findMatchingAgriImages(queryText, 2);
-        }
 
         const modelMsg: ChatMessage = {
           id: 'model-' + Date.now(),
           role: 'model',
           content: data.reply || "Here is the agricultural advisory for your query.",
-          images: deliveredImages.length > 0 ? deliveredImages : undefined,
           timestamp: Date.now()
         };
 
@@ -3371,18 +3454,11 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
     } catch (error) {
       console.warn("Server chat call failed or offline mode triggered, using local AI fallback:", error);
       
-      // Offline / Direct Client Fallback with full image support
-      let localImages: AgriImage[] = [];
-      if (checkNeedImage) {
-        localImages = findMatchingAgriImages(queryText, 2);
-      }
-
       try {
         const locationContext = farmLocation && farmLocation !== 'General African farm context' ? ` for a farmer in ${farmLocation}` : '';
         const chatPrompt = `Respond as an expert Southern African agricultural advisor${locationContext}.
         Language: ${language}. Keep advice practical, actionable, and low-cost.
         If no exact location is provided, answer with general African farm best-practice advice that works for most farming situations.
-        ${checkNeedImage ? 'The user is requesting visual/photo guidance. Describe what the plant/pest looks like in detail and refer to the attached visual card.' : ''}
         User message: ${queryText}`;
 
          const response = await getAI().models.generateContent({
@@ -3400,7 +3476,6 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
           id: 'model-' + Date.now(),
           role: 'model',
           content: response.text || "I have prepared the requested agricultural advice.",
-          images: localImages.length > 0 ? localImages : undefined,
           timestamp: Date.now()
         }]);
       } catch (clientErr) {
@@ -3413,8 +3488,6 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
 
         if (!normalized || ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening'].some(v => normalized === v || normalized.startsWith(v))) {
           offlineReply += `Hello! I’m your AgriSmart farm advisor. I can help with crop health, pests, soil fertility, irrigation, planting windows, and market decisions${locationHint}. Ask me anything and I’ll respond with practical, field-ready guidance.`;
-        } else if (localImages.length > 0) {
-          offlineReply += `Thanks for asking about **${queryText}**. A visual reference card for **${localImages[0].title}** is attached below.\n\n**What to look for:**\n${localImages[0].symptomsOrTips?.map(s => `- ${s}`).join('\n') || '- Inspect leaves regularly.'}\n\n**Best next step:** check the crop stage, moisture, and recent weather, then apply the most suitable management practice.`;
         } else {
           offlineReply += `Thanks for asking about **${queryText}**. The best next step is to look at the crop stage, local weather, and the exact symptom you are seeing${locationHint}.\n\nI recommend: \n- inspect leaves, stems, roots, and soil moisture\n- confirm if the issue is pest, disease, nutrient stress, or watering imbalance\n- use the most suitable local control or prevention strategy\n- keep records and monitor changes after treatment.`;
         }
@@ -3423,52 +3496,11 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
           id: 'model-' + Date.now(),
           role: 'model',
           content: offlineReply,
-          images: localImages.length > 0 ? localImages : undefined,
           timestamp: Date.now()
         }]);
       }
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGenerateCustomImage = async (msgId: string, promptText: string) => {
-    setGeneratingForMsgId(msgId);
-    try {
-      const res = await fetch('/api/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: promptText })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.imageUrl) {
-          const newImg: AgriImage = {
-            id: 'custom-' + Date.now(),
-            title: data.title || `Visual Guide: ${promptText.slice(0, 35)}`,
-            category: 'technique',
-            description: data.description || `Generated high-resolution agricultural visual reference for "${promptText}".`,
-            url: data.imageUrl,
-            tags: ['ai-generated', 'custom'],
-            credit: data.isAiGenerated ? 'AgriSmart AI Visual Generator' : 'Agricultural Visual Reference'
-          };
-
-          setMessages(prev => prev.map(m => {
-            if (m.id === msgId) {
-              return {
-                ...m,
-                images: [...(m.images || []), newImg]
-              };
-            }
-            return m;
-          }));
-        }
-      }
-    } catch (e) {
-      console.error("Failed to generate custom visual:", e);
-    } finally {
-      setGeneratingForMsgId(null);
     }
   };
 
@@ -3497,40 +3529,8 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
     }
   };
 
-  const getCategoryColor = (category: AgriImage['category']) => {
-    switch (category) {
-      case 'pest': return 'bg-red-500/10 text-red-700 border-red-200';
-      case 'disease': return 'bg-amber-500/10 text-amber-700 border-amber-200';
-      case 'deficiency': return 'bg-purple-500/10 text-purple-700 border-purple-200';
-      case 'technique': return 'bg-blue-500/10 text-blue-700 border-blue-200';
-      case 'crop': return 'bg-emerald-500/10 text-emerald-700 border-emerald-200';
-      case 'soil': return 'bg-amber-900/10 text-amber-900 border-amber-300';
-      case 'livestock': return 'bg-orange-500/10 text-orange-700 border-orange-200';
-      default: return 'bg-natural-primary/10 text-natural-primary border-natural-primary/20';
-    }
-  };
-
   return (
     <div className="flex h-full flex-col p-3 sm:p-4 bg-natural-bg">
-      {/* Quick Visual Chips Header */}
-      <div className="mb-3 overflow-x-auto no-scrollbar pb-1">
-        <div className="flex items-center gap-2 min-w-max">
-          <span className="text-[10px] font-black uppercase tracking-wider text-natural-accent flex items-center gap-1 pl-1">
-            <ImageIcon size={12} className="text-natural-gold" /> {t.visualGuide}:
-          </span>
-          {QUICK_PROMPTS.map((chip, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleSend(chip.query, true)}
-              disabled={loading}
-              className="bg-white hover:bg-natural-primary hover:text-white text-natural-primary px-3 py-1.5 rounded-full text-xs font-semibold border border-natural-accent/15 shadow-sm transition-all flex items-center gap-1 active:scale-95 disabled:opacity-50"
-            >
-              <span>{chip.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Messages Stream */}
       <div className="flex-1 overflow-y-auto space-y-4 pb-4 px-1">
         {/* Welcome Greeting */}
@@ -3542,9 +3542,6 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-natural-primary text-sm">AgriSmart AI Advisor</span>
-                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Visual AI Active
-                </span>
               </div>
               <p className="text-[11px] text-natural-accent font-medium">
                 📍 {farmLocation} • {language}
@@ -3552,7 +3549,7 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
             </div>
           </div>
           <p className="text-sm text-natural-text/80 leading-relaxed">
-            Hello! I am your AI Agricultural Assistant. Ask me anything about crop diseases, pest identification, fertilizers, or farming techniques. <strong className="text-natural-primary font-semibold">I can now provide visual photo guides and diagrams</strong> whenever you ask for images or identify pests/diseases!
+            Hello! I am your AI Agricultural Assistant. Ask me anything about crop diseases, pest identification, fertilizers, or farming techniques.
           </p>
         </div>
 
@@ -3576,109 +3573,6 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
                 <Markdown>{m.content}</Markdown>
               </div>
 
-              {/* Model Message Attached Images */}
-              {m.images && m.images.length > 0 && (
-                <div className="mt-4 pt-3 border-t border-natural-accent/15 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-natural-accent flex items-center gap-1.5">
-                      <ImageIcon size={14} className="text-natural-gold" />
-                      {m.images.length === 1 ? t.relevantImageMatch : `${t.visualReference} (${m.images.length})`}
-                    </span>
-                    <span className="text-[10px] text-natural-text/50 font-medium italic">
-                      {m.images.length === 1 ? t.imageMatchSubtitle : t.tapPhotoToZoom}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {m.images.map((img, imgIdx) => (
-                      <div 
-                        key={imgIdx} 
-                        className="bg-natural-bg/70 rounded-2xl overflow-hidden border border-natural-accent/20 group hover:border-natural-gold transition-all"
-                      >
-                        {/* Image Preview Container */}
-                        <div 
-                          onClick={() => setInspectingImage(img)}
-                          className="relative aspect-video w-full overflow-hidden bg-stone-100 cursor-pointer"
-                        >
-                          <img 
-                            src={img.url} 
-                            alt={img.title} 
-                            referrerPolicy="no-referrer"
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            loading="lazy"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3">
-                            <span className="text-white text-xs font-bold flex items-center gap-1">
-                              <Maximize2 size={14} /> {t.inspectImage}
-                            </span>
-                            <span className="bg-white/20 backdrop-blur-sm text-white text-[10px] font-semibold px-2 py-0.5 rounded-full">
-                              HD Photo
-                            </span>
-                          </div>
-
-                          <div className="absolute top-2 left-2">
-                            <span className={cn(
-                              "text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border shadow-sm backdrop-blur-md",
-                              getCategoryColor(img.category)
-                            )}>
-                              {img.category}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Image Details Card */}
-                        <div className="p-3.5 space-y-2">
-                          <h4 className="font-bold text-natural-primary text-xs leading-snug line-clamp-1">
-                            {img.title}
-                          </h4>
-                          <p className="text-[11px] text-natural-text/75 leading-relaxed line-clamp-2">
-                            {img.description}
-                          </p>
-
-                          {/* Quick Symptoms / Field Checklist */}
-                          {img.symptomsOrTips && img.symptomsOrTips.length > 0 && (
-                            <div className="bg-white/80 p-2 rounded-xl border border-natural-accent/10 space-y-1">
-                              <p className="text-[9px] font-black uppercase tracking-wider text-natural-accent">
-                                {t.symptomsToCheck}:
-                              </p>
-                              <ul className="text-[10px] text-natural-text/80 space-y-0.5">
-                                {img.symptomsOrTips.slice(0, 2).map((tip, tipIdx) => (
-                                  <li key={tipIdx} className="flex items-start gap-1">
-                                    <Check size={10} className="text-emerald-600 mt-0.5 shrink-0" />
-                                    <span className="line-clamp-1">{tip}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {/* Action Buttons */}
-                          <div className="flex items-center gap-2 pt-1">
-                            <button
-                              onClick={() => setInspectingImage(img)}
-                              className="flex-1 bg-natural-primary text-white py-1.5 px-2 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1 hover:bg-natural-primary/90 transition-colors"
-                            >
-                              <Eye size={12} />
-                              <span>{t.inspectImage}</span>
-                            </button>
-                            <a
-                              href={img.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              download={`${img.title.toLowerCase().replace(/\s+/g, '-')}.jpg`}
-                              className="p-1.5 bg-natural-tan text-natural-primary rounded-xl hover:bg-natural-accent/20 transition-colors"
-                              title={t.downloadImage}
-                            >
-                              <Download size={13} />
-                            </a>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Model Message Utility Bar */}
               {m.role === 'model' && (
                 <div className="mt-3 pt-2 border-t border-natural-accent/10 flex flex-wrap items-center justify-between gap-2">
@@ -3694,24 +3588,6 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
                     </button>
                   </div>
 
-                  {/* Generate / Request Visual Button */}
-                  <button
-                    onClick={() => handleGenerateCustomImage(m.id, m.content.slice(0, 60))}
-                    disabled={generatingForMsgId === m.id}
-                    className="bg-natural-tan hover:bg-natural-accent/20 text-natural-primary px-2.5 py-1 rounded-xl text-[10px] font-bold flex items-center gap-1 transition-all disabled:opacity-50"
-                  >
-                    {generatingForMsgId === m.id ? (
-                      <>
-                        <Loader2 size={11} className="animate-spin text-natural-gold" />
-                        <span>Generating Visual...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Wand2 size={11} className="text-natural-gold" />
-                        <span>{t.generateImage}</span>
-                      </>
-                    )}
-                  </button>
                 </div>
               )}
             </div>
@@ -3724,7 +3600,7 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
             <Loader2 className="animate-spin h-4 w-4 text-natural-gold" />
             <div className="space-y-0.5">
               <p className="text-xs font-bold text-natural-primary">AgriSmart AI Thinking...</p>
-              <p className="text-[10px] text-natural-accent font-medium">Formulating advice & fetching visual references</p>
+              <p className="text-[10px] text-natural-accent font-medium">Formulating agricultural advice</p>
             </div>
           </div>
         )}
@@ -3734,27 +3610,6 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
 
       {/* Input Bar */}
       <div className="mt-auto space-y-2">
-        {/* Toggle Visual Request Bar */}
-        <div className="flex items-center justify-between px-2">
-          <button
-            onClick={() => setRequestVisuals(!requestVisuals)}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all border",
-              requestVisuals 
-                ? "bg-natural-primary text-white border-natural-primary shadow-sm" 
-                : "bg-white text-natural-accent border-natural-accent/20 hover:text-natural-primary"
-            )}
-          >
-            <ImageIcon size={13} className={requestVisuals ? "text-natural-gold" : ""} />
-            <span>{t.requestImagePrompt}</span>
-            {requestVisuals && <Check size={12} className="text-natural-gold ml-0.5" />}
-          </button>
-
-          <span className="text-[10px] text-natural-text/50 font-medium">
-            💡 Tip: Ask "Show me..." for photos
-          </span>
-        </div>
-
         {/* Text Input Container */}
         <div className="flex gap-2 p-2 bg-white rounded-[32px] card-shadow border border-natural-accent/15">
           <div className="relative flex-1">
@@ -3762,7 +3617,7 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
               type="text" 
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder={requestVisuals ? "Ask for any crop photo, pest, or visual guide..." : "Ask an agricultural question or request images..."}
+              placeholder="Ask an agricultural question..."
               onKeyDown={e => e.key === 'Enter' && handleSend()}
               className="w-full bg-transparent py-3.5 pl-4 pr-12 text-sm focus:outline-none text-natural-primary placeholder:text-natural-text/40 font-medium"
             />
@@ -3788,175 +3643,6 @@ function AgriChat({ language, profile }: { language: Language; profile: FarmerPr
         </div>
       </div>
 
-      {/* Lightbox / Zoom Inspector Modal */}
-      {inspectingImage && (
-        <AgriImageInspectorModal 
-          image={inspectingImage}
-          language={language}
-          onClose={() => setInspectingImage(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-/**
- * Interactive Lightbox Inspector for Fullscreen Agricultural Image Analysis
- */
-function AgriImageInspectorModal({ 
-  image, 
-  language, 
-  onClose 
-}: { 
-  image: AgriImage; 
-  language: Language; 
-  onClose: () => void; 
-}) {
-  const t = TRANSLATIONS[language];
-  const [zoom, setZoom] = useState(1);
-
-  const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 2.5));
-  const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.25, 0.75));
-  const handleResetZoom = () => setZoom(1);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.92, y: 15 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.92, y: 15 }}
-        className="w-full max-w-3xl bg-white rounded-[36px] overflow-hidden shadow-2xl border border-natural-accent/20 flex flex-col max-h-[92vh]"
-      >
-        {/* Header */}
-        <div className="p-5 bg-natural-primary text-white flex items-center justify-between border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 bg-white/10 rounded-2xl flex items-center justify-center text-natural-gold">
-              <Eye size={20} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-serif font-bold text-base sm:text-lg leading-tight line-clamp-1">{image.title}</h3>
-                <span className="bg-natural-gold text-natural-primary text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  {image.category}
-                </span>
-              </div>
-              <p className="text-[11px] text-white/70 font-medium">AgriSmart High-Resolution Visual Inspector</p>
-            </div>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="h-9 w-9 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {/* Image Stage with Zoom Controls */}
-          <div className="relative rounded-[28px] overflow-hidden bg-stone-900 border border-stone-800 flex items-center justify-center min-h-[260px] max-h-[380px]">
-            <div className="overflow-auto w-full h-full flex items-center justify-center p-2">
-              <img 
-                src={image.url} 
-                alt={image.title}
-                referrerPolicy="no-referrer"
-                style={{ transform: `scale(${zoom})`, transition: 'transform 0.2s ease-out' }}
-                className="max-h-[360px] object-contain rounded-xl select-none"
-              />
-            </div>
-
-            {/* Floating Zoom Controls */}
-            <div className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-black/60 backdrop-blur-md p-1.5 rounded-2xl border border-white/15 text-white">
-              <button 
-                onClick={handleZoomOut}
-                disabled={zoom <= 0.75}
-                className="p-1.5 hover:bg-white/20 rounded-xl transition-colors disabled:opacity-30"
-                title="Zoom Out"
-              >
-                <ZoomOut size={16} />
-              </button>
-              <button 
-                onClick={handleResetZoom}
-                className="px-2 py-1 text-[11px] font-bold hover:bg-white/20 rounded-xl transition-colors"
-                title="Reset Zoom"
-              >
-                {Math.round(zoom * 100)}%
-              </button>
-              <button 
-                onClick={handleZoomIn}
-                disabled={zoom >= 2.5}
-                className="p-1.5 hover:bg-white/20 rounded-xl transition-colors disabled:opacity-30"
-                title="Zoom In"
-              >
-                <ZoomIn size={16} />
-              </button>
-            </div>
-          </div>
-
-          {/* Detailed Visual Description */}
-          <div className="bg-natural-tan/30 p-4 rounded-[24px] border border-natural-accent/15 space-y-2">
-            <h4 className="font-bold text-natural-primary text-xs uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles size={14} className="text-natural-gold" />
-              Detailed Visual Characteristics
-            </h4>
-            <p className="text-sm text-natural-text/90 leading-relaxed font-medium">
-              {image.description}
-            </p>
-          </div>
-
-          {/* Key Symptoms / Checklist */}
-          {image.symptomsOrTips && image.symptomsOrTips.length > 0 && (
-            <div className="bg-white p-4 rounded-[24px] border border-natural-accent/15 card-shadow space-y-2.5">
-              <h4 className="font-bold text-natural-primary text-xs uppercase tracking-wider flex items-center gap-1.5">
-                <CheckCircle2 size={14} className="text-emerald-600" />
-                {t.symptomsToCheck}
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {image.symptomsOrTips.map((tip, idx) => (
-                  <div key={idx} className="flex items-start gap-2 p-2.5 bg-emerald-50/60 rounded-xl border border-emerald-100">
-                    <Check size={14} className="text-emerald-600 mt-0.5 shrink-0" />
-                    <span className="text-xs text-emerald-950 font-medium leading-tight">{tip}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Action Footer */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-            <button
-              onClick={() => {
-                const u = new SpeechSynthesisUtterance(`${image.title}. ${image.description}. Key symptoms: ${image.symptomsOrTips?.join('. ') || ''}`);
-                window.speechSynthesis.speak(u);
-              }}
-              className="bg-natural-tan hover:bg-natural-accent/20 text-natural-primary px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-1.5 transition-colors"
-            >
-              <Volume2 size={14} />
-              <span>Read Aloud</span>
-            </button>
-
-            <div className="flex items-center gap-2">
-              <a
-                href={image.url}
-                target="_blank"
-                rel="noreferrer"
-                download={`${image.title.toLowerCase().replace(/\s+/g, '-')}.jpg`}
-                className="bg-natural-primary hover:bg-natural-text text-white px-5 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-95"
-              >
-                <Download size={14} />
-                <span>{t.downloadImage}</span>
-              </a>
-              <button
-                onClick={onClose}
-                className="bg-stone-200 hover:bg-stone-300 text-natural-text px-4 py-2.5 rounded-2xl text-xs font-bold transition-colors"
-              >
-                {t.close}
-              </button>
-            </div>
-          </div>
-        </div>
-      </motion.div>
     </div>
   );
 }

@@ -26,6 +26,7 @@ import {
 import { Language, TRANSLATIONS } from '../translations';
 import { type FarmerProfile } from '../db';
 import { cn } from '../lib/utils';
+import { CommunityChat } from './CommunityChat';
 
 export interface CommunityReply {
   id: string;
@@ -218,6 +219,16 @@ export function CommunityView({ language, profile }: CommunityViewProps) {
   };
 
   return (
+    <div className="p-3 sm:p-5 pb-24 h-full overflow-y-auto space-y-5">
+      <div>
+        <h2 className="text-2xl font-serif font-bold text-natural-primary">Community Group</h2>
+        <p className="text-xs text-natural-text/65 font-medium mt-0.5">Join the farmer group to share advice and discuss field work in realtime.</p>
+      </div>
+      <CommunityChat />
+    </div>
+  );
+
+  return (
     <div className="p-3 sm:p-5 space-y-5 pb-24 h-full overflow-y-auto">
       {/* Header & Quick Action */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -255,6 +266,8 @@ export function CommunityView({ language, profile }: CommunityViewProps) {
           </button>
         </div>
       </div>
+
+      <CommunityChat />
 
       {/* Search & Category Filter Pills */}
       <div className="space-y-3">

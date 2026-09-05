@@ -24,8 +24,10 @@ export function initializeDatabase() {
         language TEXT DEFAULT 'English',
         country TEXT,
         region TEXT,
+        address TEXT,
         phone_country_code TEXT,
         phone_number TEXT,
+        cell_phone_number TEXT,
         recovery_question TEXT,
         recovery_answer_hash TEXT,
         profile_image_url TEXT,
@@ -39,6 +41,9 @@ export function initializeDatabase() {
     if (!hasProfileImageColumn) {
       db.exec('ALTER TABLE users ADD COLUMN profile_image_url TEXT');
     }
+    const requiredProfileColumns = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
+    if (!requiredProfileColumns.some(column => column.name === 'address')) db.exec('ALTER TABLE users ADD COLUMN address TEXT');
+    if (!requiredProfileColumns.some(column => column.name === 'cell_phone_number')) db.exec('ALTER TABLE users ADD COLUMN cell_phone_number TEXT');
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS password_reset_tokens (
@@ -51,6 +56,65 @@ export function initializeDatabase() {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS community_chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        author TEXT NOT NULL,
+        content TEXT,
+        attachment_name TEXT,
+        attachment_type TEXT,
+        attachment_data TEXT,
+        reply_to_id INTEGER,
+        reactions TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (reply_to_id) REFERENCES community_chat_messages(id) ON DELETE SET NULL
+      )
+    `);
+    const chatMessageColumns = db.prepare("PRAGMA table_info(community_chat_messages)").all() as Array<{ name: string }>;
+    if (!chatMessageColumns.some(column => column.name === 'deleted_at')) {
+      db.exec('ALTER TABLE community_chat_messages ADD COLUMN deleted_at INTEGER');
+    }
+    if (!chatMessageColumns.some(column => column.name === 'conversation_id')) {
+      db.exec('ALTER TABLE community_chat_messages ADD COLUMN conversation_id INTEGER NOT NULL DEFAULT 0');
+    }
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS community_chat_conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL DEFAULT 'private',
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS community_chat_message_reads (
+        message_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        read_at INTEGER NOT NULL,
+        PRIMARY KEY (message_id, user_id),
+        FOREIGN KEY (message_id) REFERENCES community_chat_messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS community_chat_conversation_members (
+        conversation_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        PRIMARY KEY (conversation_id, user_id),
+        FOREIGN KEY (conversation_id) REFERENCES community_chat_conversations(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS community_chat_members (
+        user_id INTEGER PRIMARY KEY,
+        joined_at INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+    db.prepare(`
+      INSERT OR IGNORE INTO community_chat_members (user_id, joined_at)
+      SELECT id, CAST(strftime('%s', created_at) AS INTEGER) * 1000 FROM users
+    `).run();
 
     // Create farm records table
     db.exec(`
@@ -158,8 +222,10 @@ export interface User {
   language: string;
   country?: string;
   region?: string;
+  address?: string;
   phoneCountryCode?: string;
   phoneNumber?: string;
+  cellPhoneNumber?: string;
   recoveryQuestion?: string;
   profileImageUrl?: string;
 }
@@ -186,7 +252,9 @@ export async function registerUser(
   phoneNumber?: string,
   recoveryQuestion?: string,
   recoveryAnswer?: string,
-  profileImageUrl?: string
+  profileImageUrl?: string,
+  address?: string,
+  cellPhoneNumber?: string
 ): Promise<{ success: boolean; error?: string; user?: User }> {
   try {
     const database = getDatabase();
@@ -208,10 +276,15 @@ export async function registerUser(
     const normalizedRecoveryQuestion = recoveryQuestion?.trim() || null;
     const normalizedRecoveryAnswer = recoveryAnswer?.trim() ? await bcryptjs.hash(recoveryAnswer.trim().toLowerCase(), 10) : null;
     const normalizedProfileImageUrl = profileImageUrl?.trim() || null;
+    const normalizedAddress = address?.trim() || null;
+    const normalizedCellPhoneNumber = cellPhoneNumber?.trim() || null;
+    if (!normalizedProfileImageUrl || !normalizedAddress || !normalizedPhoneNumber) {
+      return { success: false, error: 'Profile photo, address, and WhatsApp number are required' };
+    }
 
     const stmt = database.prepare(`
-      INSERT INTO users (email, name, password_hash, language, country, region, phone_country_code, phone_number, recovery_question, recovery_answer_hash, profile_image_url)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (email, name, password_hash, language, country, region, address, phone_country_code, phone_number, cell_phone_number, recovery_question, recovery_answer_hash, profile_image_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = stmt.run(
@@ -221,12 +294,17 @@ export async function registerUser(
       language,
       country,
       region,
+      normalizedAddress,
       normalizedPhoneCountryCode,
       normalizedPhoneNumber,
+      normalizedCellPhoneNumber,
       normalizedRecoveryQuestion,
       normalizedRecoveryAnswer,
       normalizedProfileImageUrl
     ) as any;
+
+    database.prepare(`INSERT OR IGNORE INTO community_chat_members (user_id, joined_at) VALUES (?, ?)`)
+      .run(result.lastInsertRowid, Date.now());
 
     const user: User = {
       id: result.lastInsertRowid as number,
@@ -235,8 +313,10 @@ export async function registerUser(
       language,
       country,
       region,
+      address: normalizedAddress,
       phoneCountryCode: normalizedPhoneCountryCode || undefined,
       phoneNumber: normalizedPhoneNumber || undefined,
+      cellPhoneNumber: normalizedCellPhoneNumber || undefined,
       recoveryQuestion: normalizedRecoveryQuestion || undefined,
       profileImageUrl: normalizedProfileImageUrl || undefined
     };
@@ -285,8 +365,10 @@ export async function loginUser(
       language: user.language,
       country: user.country,
       region: user.region,
+      address: user.address || undefined,
       phoneCountryCode: user.phone_country_code || undefined,
       phoneNumber: user.phone_number || undefined,
+      cellPhoneNumber: user.cell_phone_number || undefined,
       recoveryQuestion: user.recovery_question || undefined,
       profileImageUrl: user.profile_image_url || undefined
     };
@@ -324,8 +406,10 @@ export function getUserById(userId: number): User | null {
       language: user.language,
       country: user.country,
       region: user.region,
+      address: user.address || undefined,
       phoneCountryCode: user.phone_country_code || undefined,
       phoneNumber: user.phone_number || undefined,
+      cellPhoneNumber: user.cell_phone_number || undefined,
       recoveryQuestion: user.recovery_question || undefined,
       profileImageUrl: user.profile_image_url || undefined
     };
@@ -348,8 +432,10 @@ export function getUserByEmail(email: string): User | null {
       language: user.language,
       country: user.country,
       region: user.region,
+      address: user.address || undefined,
       phoneCountryCode: user.phone_country_code || undefined,
       phoneNumber: user.phone_number || undefined,
+      cellPhoneNumber: user.cell_phone_number || undefined,
       recoveryQuestion: user.recovery_question || undefined,
       profileImageUrl: user.profile_image_url || undefined
     };
@@ -604,7 +690,7 @@ export async function resetPasswordWithCode(payload: {
 // Update user profile
 export function updateUserProfile(
   userId: number,
-  data: { name?: string; language?: string; country?: string; region?: string; profileImageUrl?: string }
+  data: { name?: string; email?: string; language?: string; country?: string; region?: string; address?: string; phoneNumber?: string; cellPhoneNumber?: string; profileImageUrl?: string }
 ): boolean {
   try {
     const database = getDatabase();
@@ -614,6 +700,10 @@ export function updateUserProfile(
     if (data.name) {
       updates.push('name = ?');
       values.push(data.name);
+    }
+    if (data.email) {
+      updates.push('email = ?');
+      values.push(normalizeEmail(data.email));
     }
     if (data.language) {
       updates.push('language = ?');
@@ -626,6 +716,18 @@ export function updateUserProfile(
     if (data.region) {
       updates.push('region = ?');
       values.push(data.region);
+    }
+    if (data.address) {
+      updates.push('address = ?');
+      values.push(data.address);
+    }
+    if (data.phoneNumber) {
+      updates.push('phone_number = ?');
+      values.push(data.phoneNumber);
+    }
+    if (data.cellPhoneNumber !== undefined) {
+      updates.push('cell_phone_number = ?');
+      values.push(data.cellPhoneNumber || null);
     }
     if (data.profileImageUrl !== undefined) {
       updates.push('profile_image_url = ?');
