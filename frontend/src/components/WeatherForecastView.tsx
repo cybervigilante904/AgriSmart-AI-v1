@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sun, 
@@ -106,10 +106,14 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
   const [activeTab, setActiveTab] = useState<'hourly' | 'daily'>('daily');
   const [weatherAlert, setWeatherAlert] = useState<{ type: 'warning' | 'info'; message: string } | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const latestRequestRef = useRef(0);
+  const weatherRef = useRef<WeatherData | null>(null);
+  const gpsCoordinatesRef = useRef<{ lat: number; lng: number } | null>(null);
 
   const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
   const fetchWeather = useCallback(async (locName: string, lat?: number, lng?: number, isRefresh = false) => {
+    const requestId = ++latestRequestRef.current;
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setError(null);
@@ -128,13 +132,16 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Weather service error (${res.status})`);
       const result: WeatherData = await res.json();
+
+      if (requestId !== latestRequestRef.current) return;
       
       // Detect significant weather changes
-      if (data && prevData) {
-        detectWeatherChanges(prevData, result);
+      if (weatherRef.current) {
+        detectWeatherChanges(weatherRef.current, result);
       }
       
-      setPrevData(data);
+      setPrevData(weatherRef.current);
+      weatherRef.current = result;
       setData(result);
       setLastUpdate(new Date());
     } catch (err: any) {
@@ -144,7 +151,7 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
       setLoading(false);
       setRefreshing(false);
     }
-  }, [data, prevData]);
+  }, []);
 
   // Detect significant weather changes and alert farmer
   const detectWeatherChanges = (oldWeather: WeatherData, newWeather: WeatherData) => {
@@ -188,7 +195,9 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
 
   // Initial fetch
   useEffect(() => {
-    fetchWeather(location);
+    const coordinates = gpsCoordinatesRef.current;
+    gpsCoordinatesRef.current = null;
+    fetchWeather(location, coordinates?.lat, coordinates?.lng);
   }, [location, fetchWeather]);
 
   // Auto-refresh every 15 minutes
@@ -224,6 +233,7 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
               placeName = `${revData.city}, ${revData.country}`;
             }
           }
+          gpsCoordinatesRef.current = { lat: latitude, lng: longitude };
           if (onLocationChange) onLocationChange(placeName);
           await fetchWeather(placeName, latitude, longitude);
         } catch {
@@ -244,6 +254,7 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
+    gpsCoordinatesRef.current = null;
     if (onLocationChange) onLocationChange(searchQuery.trim());
     fetchWeather(searchQuery.trim());
     setSearchQuery('');
@@ -339,6 +350,7 @@ export function WeatherForecastView({ location, language, onLocationChange }: We
               <button
                 key={hub.name}
                 onClick={() => {
+                  gpsCoordinatesRef.current = null;
                   if (onLocationChange) onLocationChange(`${hub.name}, ${hub.country}`);
                   fetchWeather(`${hub.name}, ${hub.country}`);
                 }}

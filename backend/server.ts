@@ -1036,18 +1036,21 @@ Formatting Rules:
         };
       });
 
-      // Map Hourly Forecast (Next 24 hours)
-      const currentHourIndex = new Date().getUTCHours();
-      const nextHours = (hourly.time || []).slice(0, 24).map((timeStr: string, idx: number) => {
+      // Map Hourly Forecast (Next 24 hours) from the provider's local timezone.
+      const currentTime = String(current.time || "");
+      const firstCurrentHour = (hourly.time || []).findIndex((timeStr: string) => timeStr >= currentTime);
+      const currentHourIndex = firstCurrentHour >= 0 ? firstCurrentHour : 0;
+      const nextHours = (hourly.time || []).slice(currentHourIndex, currentHourIndex + 24).map((timeStr: string, idx: number) => {
+        const sourceIndex = currentHourIndex + idx;
         const timePart = timeStr.split("T")[1] || "12:00";
-        const code = Number(hourly.weather_code?.[idx] ?? 1);
+        const code = Number(hourly.weather_code?.[sourceIndex] ?? 1);
         const wmo = parseWmoCode(code);
         return {
           time: timePart,
-          temp: Math.round(hourly.temperature_2m?.[idx] ?? currentTemp),
-          humidity: Math.round(hourly.relative_humidity_2m?.[idx] ?? humidity),
-          rainChance: Math.round(hourly.precipitation_probability?.[idx] ?? 0),
-          precipitation: Number(hourly.precipitation?.[idx] ?? 0),
+          temp: Math.round(hourly.temperature_2m?.[sourceIndex] ?? currentTemp),
+          humidity: Math.round(hourly.relative_humidity_2m?.[sourceIndex] ?? humidity),
+          rainChance: Math.round(hourly.precipitation_probability?.[sourceIndex] ?? 0),
+          precipitation: Number(hourly.precipitation?.[sourceIndex] ?? 0),
           cond: wmo.condition,
           icon: wmo.icon
         };
