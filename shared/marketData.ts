@@ -20,6 +20,7 @@ export interface MarketCommodity {
   rawPrice: number;
   unit: string;
   currency: string;
+  currencySymbol?: string;
   trend: 'up' | 'down' | 'stable';
   changePercent: string;
   volatility: 'Low' | 'Medium' | 'High';

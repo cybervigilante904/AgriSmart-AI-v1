@@ -380,35 +380,6 @@ async function startServer() {
       return res.status(500).json({
         error: "Image analysis is unavailable because no valid AI provider key is configured. Add OPENROUTER_API_KEY to your .env.local file."
       });
-
-      const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${openRouterKey}`,
-          "Content-Type": "application/json",
-          "X-OpenRouter-Title": "AgriSmart AI"
-        },
-        body: JSON.stringify({
-          model: OPENROUTER_MODEL,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } }
-            ]
-          }],
-          response_format: { type: "json_object" },
-          max_tokens: 1200
-        })
-      });
-      const openRouterPayload = await openRouterResponse.json();
-      if (!openRouterResponse.ok) {
-        throw new Error(openRouterPayload.error?.message || "OpenRouter image analysis failed");
-      }
-
-      const content = openRouterPayload.choices?.[0]?.message?.content;
-      if (!content) throw new Error("OpenRouter returned an empty analysis");
-      return res.json({ data: JSON.parse(content) });
     } catch (error: any) {
       console.error("Image analysis error:", error);
       return res.status(500).json({ error: error.message || "Failed to analyze image" });
