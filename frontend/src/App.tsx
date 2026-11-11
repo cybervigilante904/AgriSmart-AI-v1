@@ -2150,15 +2150,21 @@ function Scanner({ language }: { language: Language }) {
 
 
 
-  const handleRetakeImage = () => {
+  const resetScanState = () => {
+    setResult(null);
     setPreview(null);
     setAnalyzing(false);
     setValidationWarning({ show: false, reason: '' });
   };
 
+  const handleRetakeImage = () => {
+    resetScanState();
+  };
+
   const onDrop = async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
     if (!file) return;
+    setResult(null);
     setPreview(URL.createObjectURL(file));
     setAnalyzing(true);
 
@@ -2185,7 +2191,7 @@ function Scanner({ language }: { language: Language }) {
   });
 
   if (result) {
-    return <AnalysisView result={result} language={language} onBack={() => setResult(null)} />;
+    return <AnalysisView result={result} language={language} onBack={resetScanState} />;
   }
 
   // Show validation warning if needed

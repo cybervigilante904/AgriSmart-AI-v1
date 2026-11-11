@@ -151,12 +151,6 @@ export function LoginPage({ onSuccess, onSwitchToSignup, onForgotPassword }: Log
           </button>
         </div>
 
-        {/* Demo Info */}
-        <div className="mt-6 p-3 bg-natural-tan/20 rounded-xl border border-natural-accent/10 text-xs text-natural-text/70">
-          <p className="font-semibold text-natural-accent mb-1">Demo Account:</p>
-          <p>📧 demo@agrismart.com</p>
-          <p>🔐 demo@123</p>
-        </div>
       </motion.div>
     </motion.div>
   );
